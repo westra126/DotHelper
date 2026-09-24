@@ -26,4 +26,8 @@
     <PackageReference Include="Raffinert.FuzzySharp" Version="6.0.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DotHelper.Tests.Unit" />
+  </ItemGroup>
+
 </Project>
