@@ -1,0 +1,57 @@
+These templates matched your input: 
+
+Template Name                        Short Name                    Language    Type     Author                               Tags                              
+-----------------------------------  ----------------------------  ----------  -------  -----------------------------------  ----------------------------------
+API Controller                       apicontroller                 [C#]        item     Microsoft                            Web/ASP.NET                       
+ASP.NET Core Empty                   web                           [C#],F#     project  Microsoft                            Web/Empty                         
+ASP.NET Core gRPC Service            grpc                          [C#]        project  Microsoft                            Web/gRPC/API/Service              
+ASP.NET Core Web API                 webapi                        [C#],F#     project  Microsoft                            Web/Web API/API/Service           
+ASP.NET Core Web API (native AOT)    webapiaot                     [C#]        project  Microsoft                            Web/Web API/API/Service           
+ASP.NET Core Web App (Model-View...  mvc                           [C#],F#     project  Microsoft                            Web/MVC                           
+ASP.NET Core Web App (Razor Pages)   webapp,razor                  [C#]        project  Microsoft                            Web/MVC/Razor Pages               
+Blazor Web App                       blazor                        [C#]        project  Microsoft                            Web/Blazor/WebAssembly            
+Blazor WebAssembly Standalone App    blazorwasm                    [C#]        project  Microsoft                            Web/Blazor/WebAssembly/PWA        
+Class                                class                         [C#],VB     item     Microsoft                            Common                            
+Class Library                        classlib                      [C#],F#,VB  project  Microsoft                            Common/Library                    
+Console App                          console                       [C#],F#,VB  project  Microsoft                            Common/Console                    
+dotnet gitattributes file            gitattributes,.gitattributes              item     Microsoft                            Config                            
+dotnet gitignore file                gitignore,.gitignore                      item     Microsoft                            Config                            
+Dotnet local tool manifest file      tool-manifest                             item     Microsoft                            Config                            
+EditorConfig file                    editorconfig,.editorconfig                item     Microsoft                            Config                            
+Enum                                 enum                          [C#],VB     item     Microsoft                            Common                            
+global.json file                     globaljson,global.json                    item     Microsoft                            Config                            
+Interface                            interface                     [C#],VB     item     Microsoft                            Common                            
+MCP Server App                       mcpserver                     [C#]        project  Microsoft                            Common/AI/MCP                     
+Module                               module                        VB          item     Microsoft                            Common                            
+MSBuild Directory.Build.props file   buildprops                                item     Microsoft                            MSBuild/props                     
+MSBuild Directory.Build.targets ...  buildtargets                              item     Microsoft                            MSBuild/props                     
+MSBuild Directory.Packages.props...  packagesprops                             item     Microsoft                            MSBuild/packages/props/CPM        
+MSTest Playwright Test Project       mstest-playwright             [C#]        project  Microsoft                            Test/MSTest/Playwright/Desktop/Web
+MSTest Test Class                    mstest-class                  [C#],F#,VB  item     Microsoft                            Test/MSTest                       
+MSTest Test Project                  mstest                        [C#],F#,VB  project  Microsoft                            Test/MSTest/Desktop/Web           
+MVC Controller                       mvccontroller                 [C#]        item     Microsoft                            Web/ASP.NET                       
+MVC ViewImports                      viewimports                   [C#]        item     Microsoft                            Web/ASP.NET                       
+MVC ViewStart                        viewstart                     [C#]        item     Microsoft                            Web/ASP.NET                       
+NuGet Config                         nugetconfig,nuget.config                  item     Microsoft                            Config                            
+NUnit Playwright Test Project        nunit-playwright              [C#]        project  Microsoft                            Test/NUnit/Playwright/Desktop/Web 
+NUnit Test Item                      nunit-test                    [C#],F#,VB  item     Aleksei Kharlov aka halex2005 (c...  Test/NUnit                        
+NUnit Test Project                   nunit                         [C#],F#,VB  project  Aleksei Kharlov aka halex2005 (c...  Test/NUnit/Desktop/Web            
+Protocol Buffer File                 proto                                     item     Microsoft                            Web/gRPC                          
+Razor Class Library                  razorclasslib                 [C#]        project  Microsoft                            Web/Razor/Library                 
+Razor Component                      razorcomponent                [C#]        item     Microsoft                            Web/ASP.NET                       
+Razor Page                           page                          [C#]        item     Microsoft                            Web/ASP.NET                       
+Razor View                           view                          [C#]        item     Microsoft                            Web/ASP.NET                       
+Record                               record                        [C#]        item     Microsoft                            Common                            
+Solution File                        sln,solution                                       Microsoft                            Solution                          
+Struct                               struct,structure              [C#],VB     item     Microsoft                            Common                            
+Web Config                           webconfig                                 item     Microsoft                            Config                            
+Windows Forms App                    winforms                      [C#],VB     project  Microsoft                            Common/WinForms                   
+Windows Forms Class Library          winformslib                   [C#],VB     project  Microsoft                            Common/WinForms                   
+Windows Forms Control Library        winformscontrollib            [C#],VB     project  Microsoft                            Common/WinForms                   
+Worker Service                       worker                        [C#],F#     project  Microsoft                            Common/Worker/Web                 
+WPF Application                      wpf                           [C#],VB     project  Microsoft                            Common/WPF                        
+WPF Class Library                    wpflib                        [C#],VB     project  Microsoft                            Common/WPF                        
+WPF Custom Control Library           wpfcustomcontrollib           [C#],VB     project  Microsoft                            Common/WPF                        
+WPF User Control Library             wpfusercontrollib             [C#],VB     project  Microsoft                            Common/WPF                        
+xUnit Test Project                   xunit                         [C#],F#,VB  project  Microsoft                            Test/xUnit/Desktop/Web            
+

@@ -1,0 +1,7 @@
+No templates found matching: 'zzz-notemplate-zzz'.
+
+To search for the templates on NuGet.org, run:
+   dotnet new search zzz-notemplate-zzz
+
+
+For details on the exit code, refer to https://aka.ms/templating-exit-codes#103
