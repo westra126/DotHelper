@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>DotHelper</RootNamespace>
+    <AssemblyName>DotHelper</AssemblyName>
+    <OutputType>Exe</OutputType>
+    <RollForward>LatestMajor</RollForward>
+
+    <!-- dotnet tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>dh</ToolCommandName>
+    <PackageId>DotHelper</PackageId>
+    <Description>Interactive .NET project helper for the terminal</Description>
+    <Tags>dotnet;cli;scaffolding;dotnet-tool;nvim</Tags>
+    <Authors>westra126</Authors>
+    <RepositoryUrl>https://github.com/westra126/DotHelper</RepositoryUrl>
+
+    <!-- GenerateDocumentationFile intentionally NOT enabled in Phase 0:
+         avoids CS1591 (missing XML docs) under TreatWarningsAsErrors. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Spectre.Console comes transitively; only reference the CLI metapackage. -->
+    <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
+    <PackageReference Include="Raffinert.FuzzySharp" Version="6.0.1" />
+  </ItemGroup>
+
+</Project>
