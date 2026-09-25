@@ -27,11 +27,11 @@ public sealed class ListTemplatesSettings : CommandSettings
 }
 
 /// <summary>
-/// <c>dh list templates [--json] [--query &lt;q&gt;]</c>.
+/// Flow for <c>dh list templates [--json] [--query &lt;q&gt;]</c>.
 /// Interactive fuzzy picker on a TTY, ranked table for <c>--query</c>, full table when stdin
-/// is redirected, full JSON catalog for <c>--json</c>.
+/// is redirected, full JSON catalog for <c>--json</c>. Shared by the command and the root wizard.
 /// </summary>
-public sealed class ListTemplatesCommand : AsyncCommand<ListTemplatesSettings>
+public static class ListTemplatesFlow
 {
     private const int QueryResultLimit = 15;
 
@@ -41,10 +41,7 @@ public sealed class ListTemplatesCommand : AsyncCommand<ListTemplatesSettings>
         WriteIndented = false,
     };
 
-    protected override async Task<int> ExecuteAsync(
-        CommandContext context,
-        ListTemplatesSettings settings,
-        CancellationToken cancellationToken)
+    public static async Task<int> RunAsync(ListTemplatesSettings settings, CancellationToken cancellationToken)
     {
         var runner = new DotnetRunner(new DotnetRunnerOptions { DryRun = settings.DryRun });
 
@@ -174,5 +171,25 @@ public sealed class ListTemplatesCommand : AsyncCommand<ListTemplatesSettings>
         grid.AddRow("Tags", Markup.Escape(string.Join(", ", template.Tags)));
 
         AnsiConsole.Write(new Panel(grid).Header("Selected template").BorderColor(Theme.Accent));
+    }
+}
+
+/// <summary><c>dh list templates</c> — thin wrapper over <see cref="ListTemplatesFlow"/>.</summary>
+public sealed class ListTemplatesCommand : AsyncCommand<ListTemplatesSettings>
+{
+    protected override async Task<int> ExecuteAsync(
+        CommandContext context,
+        ListTemplatesSettings settings,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ListTemplatesFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            AnsiConsole.WriteLine("Cancelled.");
+            return 130;
+        }
     }
 }

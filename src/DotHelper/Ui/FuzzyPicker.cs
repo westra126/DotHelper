@@ -29,6 +29,13 @@ public sealed class FuzzyPickerOptions<T>
 
     /// <summary>Optional seed typed into the filter before the first frame.</summary>
     public string? InitialQuery { get; init; }
+
+    /// <summary>
+    /// Optional key source (Fase 5 testability). When <c>null</c> the picker reads the real
+    /// console via <see cref="ConsoleKeyReader"/> exactly as before; when set, the picker is
+    /// driven by that reader and the <see cref="Console.IsInputRedirected"/> fallback is skipped.
+    /// </summary>
+    public IKeyReader? KeyReader { get; init; }
 }
 
 /// <summary>
@@ -58,16 +65,19 @@ public sealed class FuzzyPicker<T>
     /// Ctrl+C surfaces as <see cref="OperationCanceledException"/> (the caller wires
     /// <see cref="Console.CancelKeyPress"/> to a <see cref="CancellationToken"/>).
     ///
-    /// Non-interactive fallback: when <see cref="Console.IsInputRedirected"/> is true and there is
-    /// no initial query, this method throws <see cref="InvalidOperationException"/> because no key
-    /// can be read — callers must fall back (e.g. print a plain table). When stdin is redirected
-    /// but an initial query is present, the top-ranked item is returned without any key I/O.
+    /// Non-interactive fallback: when reading the real console and <see cref="Console.IsInputRedirected"/>
+    /// is true and there is no initial query, this method throws
+    /// <see cref="InvalidOperationException"/> because no key can be read — callers must fall back
+    /// (e.g. print a plain table). When stdin is redirected but an initial query is present, the
+    /// top-ranked item is returned without any key I/O. An injected <see cref="IKeyReader"/> always
+    /// drives the interactive loop instead (tests feed a key sequence without a TTY).
     /// </remarks>
     public T? Pick(CancellationToken cancellationToken = default)
     {
         string query = _options.InitialQuery ?? string.Empty;
+        IKeyReader? injected = _options.KeyReader;
 
-        if (Console.IsInputRedirected)
+        if (injected is null && Console.IsInputRedirected)
         {
             if (query.Length == 0)
             {
@@ -80,6 +90,7 @@ public sealed class FuzzyPicker<T>
             return auto.Count > 0 ? auto[0].Item : default;
         }
 
+        IKeyReader reader = injected ?? ConsoleKeyReader.Instance;
         int selectedIndex = 0;
         int scrollOffset = 0;
         bool showDetail = false;
@@ -88,8 +99,14 @@ public sealed class FuzzyPicker<T>
 
         IReadOnlyList<ScoredItem<T>> ranked = RankItems(query);
 
-        bool previousTreatControlCAsInput = Console.TreatControlCAsInput;
-        Console.TreatControlCAsInput = true;
+        // Ctrl+C interception only matters for the real console.
+        bool previousTreatControlCAsInput = false;
+        if (injected is null)
+        {
+            previousTreatControlCAsInput = Console.TreatControlCAsInput;
+            Console.TreatControlCAsInput = true;
+        }
+
         try
         {
             LiveDisplay live = _console
@@ -102,7 +119,7 @@ public sealed class FuzzyPicker<T>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    ConsoleKeyInfo keyInfo = Console.ReadKey(intercept: true);
+                    ConsoleKeyInfo keyInfo = reader.ReadKey();
                     PickerKeyEvent evt = PickerKeyEvent.FromConsoleKeyInfo(keyInfo);
 
                     switch (evt.Action)
@@ -170,7 +187,10 @@ public sealed class FuzzyPicker<T>
         }
         finally
         {
-            Console.TreatControlCAsInput = previousTreatControlCAsInput;
+            if (injected is null)
+            {
+                Console.TreatControlCAsInput = previousTreatControlCAsInput;
+            }
         }
 
         return result;

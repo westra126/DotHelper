@@ -32,7 +32,9 @@ public static class Prompts
     {
         ArgumentNullException.ThrowIfNull(console);
 
-        TextPrompt<string> folderPrompt = new(prompt);
+        // AllowEmpty is required for the documented "Enter = empty" behavior; without it the
+        // prompt re-asks on blank input (verified against Spectre.Console 0.55).
+        TextPrompt<string> folderPrompt = new(prompt) { AllowEmpty = true };
         if (defaultValue is not null)
         {
             folderPrompt = folderPrompt.DefaultValue(defaultValue);

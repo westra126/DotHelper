@@ -3,6 +3,14 @@ using DotHelper.Cli;
 using Spectre.Console.Cli;
 
 var app = new CommandApp();
+
+// Fase 5: `dh` without arguments runs the root wizard (PLAN.md §5.2/§5.3). Registered through
+// Spectre.Console.Cli 0.55 `CommandApp.SetDefaultCommand<T>()`; explicit commands/branches keep
+// their routing. Without a TTY the wizard falls back to this same help screen.
+app.SetDefaultCommand<RootWizardCommand>()
+    .WithDescription("Interactive wizard: pick an action with fuzzy search");
+RootWizardCommand.HelpFallback = () => app.Run(new[] { "--help" });
+
 app.Configure(config =>
 {
     config.SetApplicationName("dh");

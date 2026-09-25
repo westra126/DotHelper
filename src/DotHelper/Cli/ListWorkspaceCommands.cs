@@ -15,20 +15,20 @@ public sealed class ListProjectsSettings : WorkspaceCommandSettings
 {
 }
 
-/// <summary>Lists solution files found under the current directory.</summary>
-public sealed class ListSolutionsCommand : AsyncCommand<ListSolutionsSettings>
+/// <summary>
+/// Flow for <c>dh list solutions</c> (shared with the root wizard).
+/// </summary>
+public static class ListSolutionsFlow
 {
-    protected override Task<int> ExecuteAsync(
-        CommandContext context,
-        ListSolutionsSettings settings,
-        CancellationToken cancellationToken)
+    /// <summary>Lists solution files found under the current directory.</summary>
+    public static int Run()
     {
         IReadOnlyList<string> solutions = WorkspaceScanner.FindSolutions(Environment.CurrentDirectory);
 
         if (solutions.Count == 0)
         {
             CliSupport.PrintError("No .sln/.slnx files found under the current directory.");
-            return Task.FromResult(1);
+            return 1;
         }
 
         var table = new Table();
@@ -39,7 +39,19 @@ public sealed class ListSolutionsCommand : AsyncCommand<ListSolutionsSettings>
         }
 
         AnsiConsole.Write(table);
-        return Task.FromResult(0);
+        return 0;
+    }
+}
+
+/// <summary>Lists solution files found under the current directory.</summary>
+public sealed class ListSolutionsCommand : AsyncCommand<ListSolutionsSettings>
+{
+    protected override Task<int> ExecuteAsync(
+        CommandContext context,
+        ListSolutionsSettings settings,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(ListSolutionsFlow.Run());
     }
 }
 
