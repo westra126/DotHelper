@@ -98,8 +98,9 @@ public static class NewSolutionFlow
             .CreateAsync(name, outputDir: null, format, cancellationToken)
             .ConfigureAwait(false);
 
-        CliSupport.PrintSuccess($"Created {name}.{(format == SlnFormat.Slnx ? "slnx" : "sln")}");
-        CliSupport.PrintCommand(result);
+        string solutionFile = $"{name}.{(format == SlnFormat.Slnx ? "slnx" : "sln")}";
+        CliSupport.PrintOutcome(result, $"Created {solutionFile}", $"would create {solutionFile}");
+        CliSupport.CopyCommands(settings, result.CommandLine);
 
         if (settings.Yes || settings.DryRun)
         {
@@ -113,6 +114,7 @@ public static class NewSolutionFlow
                 DryRun = settings.DryRun,
                 Yes = settings.Yes,
                 Verbose = settings.Verbose,
+                PrintCmd = settings.PrintCmd,
             };
             return await NewProjectFlow.RunAsync(projectSettings, cancellationToken).ConfigureAwait(false);
         }
@@ -174,8 +176,7 @@ public static class NewProjectFlow
             .ConfigureAwait(false);
 
         string projectFile = Path.Combine(projectDirectory, name + ".csproj");
-        CliSupport.PrintSuccess($"Created {projectFile}");
-        CliSupport.PrintCommand(create);
+        CliSupport.PrintOutcome(create, $"Created {projectFile}", $"would create {projectFile}");
 
         bool shouldAdd = settings.AddToSln ||
             (!settings.NoAddToSln && workspace.SolutionPath is not null);
@@ -186,13 +187,18 @@ public static class NewProjectFlow
             DotnetResult add = await solutionService
                 .AddProjectAsync(workspace.SolutionPath, projectFile, cancellationToken)
                 .ConfigureAwait(false);
-            CliSupport.PrintSuccess($"Added to {Path.GetFileName(workspace.SolutionPath)}");
-            CliSupport.PrintCommand(add);
+            string slnName = Path.GetFileName(workspace.SolutionPath);
+            CliSupport.PrintOutcome(add, $"Added to {slnName}", $"would add to {slnName}");
+            CliSupport.CopyCommands(settings, create.CommandLine, add.CommandLine);
         }
         else if (settings.AddToSln && workspace.SolutionPath is null)
         {
             CliSupport.PrintError("No solution found to add the project to.");
             return 1;
+        }
+        else
+        {
+            CliSupport.CopyCommands(settings, create.CommandLine);
         }
 
         return 0;

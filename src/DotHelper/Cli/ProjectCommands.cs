@@ -176,9 +176,12 @@ public static class ProjectRefFlow
             ? await projectService.RemoveReferenceAsync(from, to, cancellationToken).ConfigureAwait(false)
             : await projectService.AddReferenceAsync(from, to, cancellationToken).ConfigureAwait(false);
 
-        string verb = remove ? "Removed" : "Added";
-        CliSupport.PrintSuccess($"{verb} reference {Path.GetFileName(from)} → {Path.GetFileName(to)}");
-        CliSupport.PrintCommand(result);
+        string target = $"{Path.GetFileName(from)} → {Path.GetFileName(to)}";
+        CliSupport.PrintOutcome(
+            result,
+            remove ? $"Removed reference {target}" : $"Added reference {target}",
+            remove ? $"would remove reference {target}" : $"would add reference {target}");
+        CliSupport.CopyCommands(settings, result.CommandLine);
         return 0;
     }
 

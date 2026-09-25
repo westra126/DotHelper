@@ -136,8 +136,8 @@ public static class ItemFlow
             .ConfigureAwait(false);
 
         string createdPath = ResolveCreatedPath(projectDirectory, outputSubdir, name);
-        CliSupport.PrintSuccess($"Created {createdPath}");
-        CliSupport.PrintCommand(result);
+        CliSupport.PrintOutcome(result, $"Created {createdPath}", $"would create {createdPath}");
+        CliSupport.CopyCommands(settings, result.CommandLine);
         return 0;
     }
 

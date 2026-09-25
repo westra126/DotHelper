@@ -185,13 +185,16 @@ public sealed class DotnetRunner : IDotnetRunner
 
     /// <summary>
     /// Best-effort append-only file log. Logging must never fail the tool.
+    /// The file is named after the <b>local</b> date (so an evening session lands in that day's
+    /// file) while the timestamps inside stay in UTC for unambiguous ordering — documented
+    /// decision (Fase 6).
     /// </summary>
     private void Log(string message)
     {
         try
         {
             Directory.CreateDirectory(_logDirectory);
-            string path = Path.Combine(_logDirectory, $"dothelper-{DateTime.UtcNow:yyyyMMdd}.log");
+            string path = Path.Combine(_logDirectory, $"dothelper-{DateTime.Now:yyyyMMdd}.log");
             File.AppendAllText(path, $"{DateTime.UtcNow:O} {message}{Environment.NewLine}");
         }
         catch (IOException)

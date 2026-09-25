@@ -15,6 +15,9 @@
     <Tags>dotnet;cli;scaffolding;dotnet-tool;nvim</Tags>
     <Authors>westra126</Authors>
     <RepositoryUrl>https://github.com/westra126/DotHelper</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/westra126/DotHelper</PackageProjectUrl>
+    <!-- README ships inside the nupkg (root). License intentionally pending (author decision). -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
 
     <!-- GenerateDocumentationFile intentionally NOT enabled in Phase 0:
          avoids CS1591 (missing XML docs) under TreatWarningsAsErrors. -->
@@ -28,6 +31,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DotHelper.Tests.Unit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
 </Project>

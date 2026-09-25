@@ -28,6 +28,7 @@ app.Configure(config =>
 
     config.AddBranch("new", nw =>
     {
+        nw.SetDescription("Create a new solution or project");
         nw.AddCommand<NewSolutionCommand>("solution")
             .WithDescription("Create a new solution");
         nw.AddCommand<NewProjectCommand>("project")
@@ -36,6 +37,7 @@ app.Configure(config =>
 
     config.AddBranch("sln", sln =>
     {
+        sln.SetDescription("Manage the projects of the active solution");
         sln.AddCommand<SlnListCommand>("list")
             .WithDescription("List projects of the active solution");
         sln.AddCommand<SlnAddCommand>("add")
@@ -46,6 +48,7 @@ app.Configure(config =>
 
     config.AddBranch("project", proj =>
     {
+        proj.SetDescription("List projects and wire project references");
         proj.AddCommand<ProjectListCommand>("list")
             .WithDescription("List projects of the active solution");
         proj.AddCommand<ProjectAddRefCommand>("add-ref")
@@ -56,6 +59,7 @@ app.Configure(config =>
 
     config.AddBranch("nuget", nuget =>
     {
+        nuget.SetDescription("Search, add, remove and list NuGet packages");
         nuget.AddCommand<NugetSearchCommand>("search")
             .WithDescription("Search packages on nuget.org");
         nuget.AddCommand<NugetAddCommand>("add")
@@ -68,6 +72,7 @@ app.Configure(config =>
 
     config.AddBranch("list", list =>
     {
+        list.SetDescription("List templates, projects and solutions");
         list.AddCommand<ListTemplatesCommand>("templates")
             .WithDescription("List available dotnet new templates");
         list.AddCommand<ListSolutionsCommand>("solutions")

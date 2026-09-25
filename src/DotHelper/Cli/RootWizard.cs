@@ -5,8 +5,12 @@ using Spectre.Console.Cli;
 
 namespace DotHelper.Cli;
 
-/// <summary><c>dh</c> (no arguments) — root interactive wizard (PLAN.md §5.2 / §5.3).</summary>
-public sealed class RootWizardSettings : CommandSettings
+/// <summary>
+/// <c>dh</c> (no arguments) — root interactive wizard (PLAN.md §5.2 / §5.3).
+/// Inherits the common workspace flags so <c>dh --dry-run</c>/<c>--print-cmd</c>/<c>--verbose</c>
+/// reach the dispatched flows (PLAN.md §5.2 lists <c>--dry-run</c> as a global flag).
+/// </summary>
+public sealed class RootWizardSettings : WorkspaceCommandSettings
 {
     /// <summary>Pre-fills the action filter (e.g. <c>dh --query "cl"</c>).</summary>
     [CommandOption("-q|--query <QUERY>")]
@@ -35,7 +39,7 @@ public sealed class RootWizardCommand : AsyncCommand<RootWizardSettings>
             var wizard = new RootWizard(
                 AnsiConsole.Console,
                 keyReader: null,
-                executor: null,
+                executor: (item, ct) => WizardDispatcher.RunAsync(item, settings, ct),
                 showHelp: HelpFallback,
                 inputRedirected: null,
                 version: null);

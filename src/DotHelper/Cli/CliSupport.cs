@@ -192,6 +192,74 @@ public static class CliSupport
     public static void PrintError(string message) =>
         AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(message)}");
 
+    /// <summary>
+    /// Outcome line of a mutating command (pure): in dry-run the message must be unmistakable
+    /// (<c>Dry-run: would …</c>) instead of claiming a past success (Fase 6 polish).
+    /// </summary>
+    public static string FormatOutcome(DotnetResult result, string successMessage, string wouldMessage)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentException.ThrowIfNullOrWhiteSpace(successMessage);
+        ArgumentException.ThrowIfNullOrWhiteSpace(wouldMessage);
+
+        return result.DryRun ? $"Dry-run: {wouldMessage}" : successMessage;
+    }
+
+    /// <summary>
+    /// Prints the outcome of a mutation followed by the equivalent <c>dotnet</c> command:
+    /// an unmistakable <c>Dry-run: would …</c> line when nothing ran, a success line otherwise.
+    /// </summary>
+    public static void PrintOutcome(DotnetResult result, string successMessage, string wouldMessage)
+    {
+        string message = FormatOutcome(result, successMessage, wouldMessage);
+        if (result.DryRun)
+        {
+            AnsiConsole.MarkupLine($"[{Theme.MutedMarkup}]○[/] [grey]{Markup.Escape(message)}[/]");
+        }
+        else
+        {
+            PrintSuccess(message);
+        }
+
+        PrintCommand(result);
+    }
+
+    /// <summary>
+    /// <c>--print-cmd</c> (PLAN.md §6e): copies the equivalent <c>dotnet</c> command(s) to the
+    /// clipboard through <see cref="Clipboard"/> when available. Best-effort — a missing or broken
+    /// clipboard tool never breaks the flow; only <c>--verbose</c> surfaces the reason.
+    /// </summary>
+    public static void CopyCommands(WorkspaceCommandSettings settings, params string[] commandLines)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(commandLines);
+
+        if (!settings.PrintCmd || commandLines.Length == 0)
+        {
+            return;
+        }
+
+        ClipboardResult result = Clipboard.TryCopy(string.Join(Environment.NewLine, commandLines));
+        switch (result.Status)
+        {
+            case ClipboardStatus.Copied:
+                AnsiConsole.MarkupLine(
+                    $"[{Theme.MutedMarkup}]Clipboard:[/] copied {commandLines.Length} command(s) via {Markup.Escape(result.Tool ?? "?")}");
+                break;
+
+            case ClipboardStatus.NoTool when settings.Verbose:
+                AnsiConsole.MarkupLine(
+                    $"[{Theme.MutedMarkup}]Clipboard:[/] no tool found ({string.Join("/", Clipboard.CandidateTools)}); nothing copied.");
+                break;
+
+            case ClipboardStatus.Failed when settings.Verbose:
+                AnsiConsole.MarkupLine(
+                    $"[{Theme.MutedMarkup}]Clipboard:[/] {Markup.Escape(result.Tool ?? "?")} failed " +
+                    $"({Markup.Escape(result.Error ?? "unknown")}); nothing copied.");
+                break;
+        }
+    }
+
     /// <summary>Combines name + output the way <c>dh new project</c> does: output is the parent folder.</summary>
     public static string ComposeProjectDirectory(string? outputParent, string name) =>
         string.IsNullOrWhiteSpace(outputParent) ? name : Path.Combine(outputParent, name);

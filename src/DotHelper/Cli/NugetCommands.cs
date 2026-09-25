@@ -290,26 +290,17 @@ public static class NugetFlow
         return CliSupport.ChooseProject(console, candidates, "project", query, yes);
     }
 
-    /// <summary>Prints the exact <c>dotnet</c> command that was (or would be) executed.</summary>
-    public static void PrintResult(DotnetResult result, string successMessage, string dryRunMessage)
+    /// <summary>
+    /// Handles a mutating result: friendly error on failure, otherwise the unified outcome line
+    /// (<c>Dry-run: would …</c> / success) plus the clipboard copy under <c>--print-cmd</c>.
+    /// </summary>
+    public static int Finish(
+        WorkspaceCommandSettings settings,
+        DotnetResult result,
+        string successMessage,
+        string wouldMessage)
     {
-        ArgumentNullException.ThrowIfNull(result);
-
-        if (result.DryRun)
-        {
-            CliSupport.PrintSuccess($"Dry-run: {dryRunMessage}");
-        }
-        else if (result.ExitCode == 0)
-        {
-            CliSupport.PrintSuccess(successMessage);
-        }
-
-        CliSupport.PrintCommand(result);
-    }
-
-    /// <summary>Handles a mutating result: friendly error on failure, transparency line on success.</summary>
-    public static int Finish(DotnetResult result, string successMessage, string dryRunMessage)
-    {
+        ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(result);
 
         if (!result.DryRun && result.ExitCode != 0)
@@ -318,7 +309,8 @@ public static class NugetFlow
             return 1;
         }
 
-        PrintResult(result, successMessage, dryRunMessage);
+        CliSupport.PrintOutcome(result, successMessage, wouldMessage);
+        CliSupport.CopyCommands(settings, result.CommandLine);
         return 0;
     }
 }
@@ -416,6 +408,7 @@ public static class NugetAddFlow
 
         string target = Path.GetFileName(projectFile);
         return NugetFlow.Finish(
+            settings,
             result,
             $"Added {resolved.Id} to {target}",
             $"would add {resolved.Id} to {target}");
@@ -649,6 +642,7 @@ public static class NugetRemoveFlow
 
         string target = Path.GetFileName(projectFile);
         return NugetFlow.Finish(
+            settings,
             result,
             $"Removed {packageId} from {target}",
             $"would remove {packageId} from {target}");

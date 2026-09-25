@@ -101,8 +101,9 @@ public sealed class SlnAddCommand : AsyncCommand<SlnAddSettings>
                 .AddProjectAsync(workspace.SolutionPath, projectPath, cancellationToken)
                 .ConfigureAwait(false);
 
-            CliSupport.PrintSuccess($"Added {projectPath} to {Path.GetFileName(workspace.SolutionPath)}");
-            CliSupport.PrintCommand(result);
+            string slnName = Path.GetFileName(workspace.SolutionPath);
+            CliSupport.PrintOutcome(result, $"Added {projectPath} to {slnName}", $"would add {projectPath} to {slnName}");
+            CliSupport.CopyCommands(settings, result.CommandLine);
             return 0;
         }
         catch (OperationCanceledException)
@@ -167,8 +168,9 @@ public sealed class SlnRemoveCommand : AsyncCommand<SlnRemoveSettings>
                 .RemoveProjectAsync(workspace.SolutionPath, projectPath, cancellationToken)
                 .ConfigureAwait(false);
 
-            CliSupport.PrintSuccess($"Removed {projectPath} from {Path.GetFileName(workspace.SolutionPath)}");
-            CliSupport.PrintCommand(result);
+            string slnName = Path.GetFileName(workspace.SolutionPath);
+            CliSupport.PrintOutcome(result, $"Removed {projectPath} from {slnName}", $"would remove {projectPath} from {slnName}");
+            CliSupport.CopyCommands(settings, result.CommandLine);
             return 0;
         }
         catch (OperationCanceledException)

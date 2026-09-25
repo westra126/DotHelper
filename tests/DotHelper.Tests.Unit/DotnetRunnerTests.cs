@@ -114,6 +114,21 @@ public sealed class DotnetRunnerTests
     }
 
     [Fact]
+    public async Task Log_file_name_uses_the_local_date()
+    {
+        // Fase 6: the file is named after the local date (an evening session lands in that
+        // day's file); timestamps inside stay UTC.
+        using TempLogDir logDir = new();
+        var runner = new DotnetRunner(new DotnetRunnerOptions { LogDirectory = logDir.Path });
+
+        await runner.RunAsync(new[] { "--version" }, workingDir: null, cancellationToken: CancellationToken.None);
+
+        string[] files = Directory.GetFiles(logDir.Path);
+        files.Should().ContainSingle();
+        Path.GetFileName(files[0]).Should().Be($"dothelper-{DateTime.Now:yyyyMMdd}.log");
+    }
+
+    [Fact]
     public async Task DryRun_writes_a_log_line_without_starting_a_process()
     {
         using TempLogDir logDir = new();

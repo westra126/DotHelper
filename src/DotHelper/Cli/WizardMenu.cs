@@ -147,29 +147,52 @@ public static class WizardMenu
 /// </summary>
 public static class WizardDispatcher
 {
-    public static Task<int> RunAsync(WizardItem item, CancellationToken cancellationToken)
+    /// <summary>Dispatches with default flow settings.</summary>
+    public static Task<int> RunAsync(WizardItem item, CancellationToken cancellationToken) =>
+        RunAsync(item, inherit: null, cancellationToken);
+
+    /// <summary>
+    /// Dispatches the flow behind <paramref name="item"/>, inheriting the common flags
+    /// (<c>--dry-run</c>/<c>--yes</c>/<c>--verbose</c>/<c>--print-cmd</c>) from the wizard root.
+    /// </summary>
+    public static Task<int> RunAsync(
+        WizardItem item,
+        WorkspaceCommandSettings? inherit,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(item);
 
         return item.Id switch
         {
-            "new.solution" => NewSolutionFlow.RunAsync(new NewSolutionSettings(), cancellationToken),
-            "new.project" => NewProjectFlow.RunAsync(new NewProjectSettings(), cancellationToken),
-            "new.item" => ItemFlow.RunAsync(new ItemCommandSettings(), cancellationToken),
+            "new.solution" => NewSolutionFlow.RunAsync(New<NewSolutionSettings>(inherit), cancellationToken),
+            "new.project" => NewProjectFlow.RunAsync(New<NewProjectSettings>(inherit), cancellationToken),
+            "new.item" => ItemFlow.RunAsync(New<ItemCommandSettings>(inherit), cancellationToken),
 
-            "nuget.search" => NugetSearchFlow.RunAsync(new NugetSearchSettings(), cancellationToken),
-            "nuget.add" => NugetAddFlow.RunAsync(new NugetAddSettings(), cancellationToken),
-            "nuget.remove" => NugetRemoveFlow.RunAsync(new NugetRemoveSettings(), cancellationToken),
-            "nuget.list" => NugetListFlow.RunAsync(new NugetListSettings(), cancellationToken),
+            "nuget.search" => NugetSearchFlow.RunAsync(New<NugetSearchSettings>(inherit), cancellationToken),
+            "nuget.add" => NugetAddFlow.RunAsync(New<NugetAddSettings>(inherit), cancellationToken),
+            "nuget.remove" => NugetRemoveFlow.RunAsync(New<NugetRemoveSettings>(inherit), cancellationToken),
+            "nuget.list" => NugetListFlow.RunAsync(New<NugetListSettings>(inherit), cancellationToken),
 
-            "references.add" => ProjectRefFlow.RunAsync(new ProjectAddRefSettings(), remove: false, cancellationToken),
-            "references.remove" => ProjectRefFlow.RunAsync(new ProjectAddRefSettings(), remove: true, cancellationToken),
+            "references.add" => ProjectRefFlow.RunAsync(New<ProjectAddRefSettings>(inherit), remove: false, cancellationToken),
+            "references.remove" => ProjectRefFlow.RunAsync(New<ProjectAddRefSettings>(inherit), remove: true, cancellationToken),
 
-            "list.templates" => ListTemplatesFlow.RunAsync(new ListTemplatesSettings(), cancellationToken),
-            "list.projects" => ProjectListFlow.RunAsync(new ProjectListSettings(), listOnly: true, cancellationToken),
+            "list.templates" => ListTemplatesFlow.RunAsync(NewListTemplates(inherit), cancellationToken),
+            "list.projects" => ProjectListFlow.RunAsync(New<ProjectListSettings>(inherit), listOnly: true, cancellationToken),
             "list.solutions" => Task.FromResult(ListSolutionsFlow.Run()),
 
             _ => throw new InvalidOperationException($"Unknown wizard action '{item.Id}'."),
         };
     }
+
+    private static T New<T>(WorkspaceCommandSettings? inherit)
+        where T : WorkspaceCommandSettings, new()
+    {
+        T settings = new();
+        settings.InheritFrom(inherit);
+        return settings;
+    }
+
+    // ListTemplatesSettings predates the common flags and owns its own --dry-run.
+    private static ListTemplatesSettings NewListTemplates(WorkspaceCommandSettings? inherit) =>
+        new() { DryRun = inherit?.DryRun ?? false };
 }
