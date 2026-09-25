@@ -61,6 +61,10 @@ public static class WorkspaceLocator
     private static List<WorkspaceArtifact> FindInDirectory(string directory)
     {
         List<WorkspaceArtifact> found = [];
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return found;
+        }
 
         try
         {
@@ -110,7 +114,10 @@ public static class WorkspaceLocator
 
         try
         {
-            return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string full = Path.GetFullPath(path);
+            string trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            // Root "/" trims to "" — keep the untrimmed form so callers can keep walking/stopping.
+            return trimmed.Length == 0 ? full : trimmed;
         }
         catch (Exception e) when (e is IOException or ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -122,8 +129,15 @@ public static class WorkspaceLocator
     {
         try
         {
-            return Directory.GetParent(directory)?.FullName
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            DirectoryInfo? parent = Directory.GetParent(directory);
+            if (parent is null)
+            {
+                return null;
+            }
+
+            string trimmed = parent.FullName.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            // Reached the filesystem root: stop the walk.
+            return trimmed.Length == 0 ? null : trimmed;
         }
         catch (Exception e) when (e is IOException or ArgumentException or NotSupportedException)
         {

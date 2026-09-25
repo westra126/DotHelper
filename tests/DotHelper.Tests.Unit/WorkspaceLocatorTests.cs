@@ -148,6 +148,29 @@ public sealed class WorkspaceLocatorTests
         }
     }
 
+    [Fact]
+    public void Walk_to_filesystem_root_without_boundary_does_not_throw()
+    {
+        // Regression: trimming '/' to "" used to make the walk call EnumerateFiles("") and crash
+        // before any boundary could stop it (hit when no solution exists anywhere up the tree).
+        string root = CreateTempRoot();
+        try
+        {
+            string nested = Path.Combine(root, "a", "b", "c");
+            Directory.CreateDirectory(nested);
+
+            Action act = () => WorkspaceLocator.Locate(nested);
+
+            act.Should().NotThrow();
+            WorkspaceLookupResult result = WorkspaceLocator.Locate(nested);
+            result.Closest.Should().BeNull("the temp tree has no solution/project files");
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
     private static string CreateTempRoot()
     {
         string root = Path.Combine(Path.GetTempPath(), "dothelper-ws-" + Guid.NewGuid().ToString("N"));

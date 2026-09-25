@@ -1,0 +1,4 @@
+Project(s)
+----------
+a/A.csproj
+b/B.csproj

@@ -7,14 +7,53 @@ app.Configure(config =>
 {
     config.SetApplicationName("dh");
     config.Settings.ApplicationVersion = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    config.Settings.CancellationExitCode = 130;
 
     config.AddCommand<AboutCommand>("about")
         .WithDescription("Show DotHelper version and information");
+
+    config.AddCommand<ItemCommand>("item")
+        .WithDescription("Create a new item (class, record, interface, ...) inside a project");
+
+    config.AddCommand<ClassCommand>("class")
+        .WithDescription("Create a new class (alias of 'dh item' pre-loading the class query)");
+
+    config.AddBranch("new", nw =>
+    {
+        nw.AddCommand<NewSolutionCommand>("solution")
+            .WithDescription("Create a new solution");
+        nw.AddCommand<NewProjectCommand>("project")
+            .WithDescription("Create a new project from a template");
+    });
+
+    config.AddBranch("sln", sln =>
+    {
+        sln.AddCommand<SlnListCommand>("list")
+            .WithDescription("List projects of the active solution");
+        sln.AddCommand<SlnAddCommand>("add")
+            .WithDescription("Add a project to the active solution");
+        sln.AddCommand<SlnRemoveCommand>("remove")
+            .WithDescription("Remove a project from the active solution");
+    });
+
+    config.AddBranch("project", proj =>
+    {
+        proj.AddCommand<ProjectListCommand>("list")
+            .WithDescription("List projects of the active solution");
+        proj.AddCommand<ProjectAddRefCommand>("add-ref")
+            .WithDescription("Add a project reference");
+        proj.AddCommand<ProjectRemoveRefCommand>("remove-ref")
+            .WithDescription("Remove a project reference");
+    });
 
     config.AddBranch("list", list =>
     {
         list.AddCommand<ListTemplatesCommand>("templates")
             .WithDescription("List available dotnet new templates");
+        list.AddCommand<ListSolutionsCommand>("solutions")
+            .WithDescription("List solution files under the current directory");
+        list.AddCommand<ListProjectsCommand>("projects")
+            .WithDescription("List projects of the active solution");
     });
 });
 
