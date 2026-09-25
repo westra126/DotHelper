@@ -1,0 +1,16 @@
+  Determinando los proyectos que se van a restaurar...
+  Todos los proyectos están actualizados para la restauración.
+El proyecto "P" tiene las referencias de paquete siguientes
+   [net10.0]: 
+   Paquete de nivel superior           Solicitado   Resuelto
+   > Microsoft.Extensions.Logging      10.0.12      10.0.12 
+   > Newtonsoft.Json                   13.*         13.0.4  
+   > NuGet.Versioning                  [6.0, 7.0)   6.0.0   
+
+   Paquete transitivo                                           Resuelto
+   > Microsoft.Extensions.DependencyInjection                   10.0.12 
+   > Microsoft.Extensions.DependencyInjection.Abstractions      10.0.12 
+   > Microsoft.Extensions.Logging.Abstractions                  10.0.12 
+   > Microsoft.Extensions.Options                               10.0.12 
+   > Microsoft.Extensions.Primitives                            10.0.12 
+

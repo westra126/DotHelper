@@ -46,6 +46,18 @@ app.Configure(config =>
             .WithDescription("Remove a project reference");
     });
 
+    config.AddBranch("nuget", nuget =>
+    {
+        nuget.AddCommand<NugetSearchCommand>("search")
+            .WithDescription("Search packages on nuget.org");
+        nuget.AddCommand<NugetAddCommand>("add")
+            .WithDescription("Add a package reference to a project");
+        nuget.AddCommand<NugetRemoveCommand>("remove")
+            .WithDescription("Remove a package reference from a project");
+        nuget.AddCommand<NugetListCommand>("list")
+            .WithDescription("List the package references of a project");
+    });
+
     config.AddBranch("list", list =>
     {
         list.AddCommand<ListTemplatesCommand>("templates")

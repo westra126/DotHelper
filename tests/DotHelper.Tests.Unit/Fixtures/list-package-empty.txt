@@ -1,0 +1,4 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+Project 'Empty' has the following package references
+   [net10.0]: No packages were found for this framework.

@@ -16,6 +16,7 @@ public sealed class TempWorkspace : IDisposable
         Solutions = new SolutionService(Runner);
         Projects = new ProjectService(Runner);
         Items = new ItemService(Runner);
+        Packages = new NugetService(Runner);
     }
 
     public string Root { get; }
@@ -27,6 +28,8 @@ public sealed class TempWorkspace : IDisposable
     public ProjectService Projects { get; }
 
     public ItemService Items { get; }
+
+    public NugetService Packages { get; }
 
     /// <summary>Test cancellation token (xunit.v3).</summary>
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

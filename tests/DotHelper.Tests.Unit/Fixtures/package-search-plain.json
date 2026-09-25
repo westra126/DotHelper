@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "problems": [],
+  "searchResult": [
+    {
+      "sourceName": "nuget.org",
+      "packages": [
+        {
+          "id": "Newtonsoft.Json",
+          "latestVersion": "13.0.4",
+          "totalDownloads": 9288626611,
+          "owners": "dotnetfoundation, jamesnk, newtonsoft"
+        },
+        {
+          "id": "Newtonsoft.Json.Bson",
+          "latestVersion": "1.0.3",
+          "totalDownloads": 1409642478,
+          "owners": "dotnetfoundation, jamesnk, newtonsoft"
+        },
+        {
+          "id": "Microsoft.AspNetCore.Mvc.NewtonsoftJson",
+          "latestVersion": "10.0.12",
+          "totalDownloads": 841189143,
+          "owners": "aspnet, dotnetframework, Microsoft"
+        }
+      ]
+    }
+  ]
+}
