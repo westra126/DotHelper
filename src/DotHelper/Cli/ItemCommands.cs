@@ -1,4 +1,5 @@
 using DotHelper.Core.Dotnet;
+using DotHelper.Core.Workspace;
 using DotHelper.Ui;
 
 using Spectre.Console;
@@ -36,15 +37,7 @@ public sealed class ItemCommand : AsyncCommand<ItemCommandSettings>
         ItemCommandSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await ItemFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await ItemFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -59,27 +52,30 @@ public sealed class ClassCommand : AsyncCommand<ItemCommandSettings>
         ItemCommandSettings settings,
         CancellationToken cancellationToken)
     {
-        var preset = new ItemCommandSettings
+        ItemCommandSettings preset = PresetFor(settings);
+
+        return await ItemFlow.RunAsync(preset, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Builds the <c>dh item</c> settings preset with the <c>class</c> query (internal for
+    /// tests). <see cref="WorkspaceCommandSettings.InheritFrom"/> copies every common flag so
+    /// <c>--print-cmd</c>/<c>--dry-run</c>/<c>--verbose</c> are never lost.
+    /// </summary>
+    internal static ItemCommandSettings PresetFor(ItemCommandSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        ItemCommandSettings preset = new()
         {
             Template = settings.Template,
             Name = settings.Name,
             Project = settings.Project,
             Output = settings.Output,
             Query = string.IsNullOrWhiteSpace(settings.Query) ? "class" : settings.Query,
-            DryRun = settings.DryRun,
-            Yes = settings.Yes,
-            Verbose = settings.Verbose,
         };
-
-        try
-        {
-            return await ItemFlow.RunAsync(preset, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        preset.InheritFrom(settings);
+        return preset;
     }
 }
 
@@ -107,6 +103,10 @@ public static class ItemFlow
 
         string templateShortName = template.ShortNames.FirstOrDefault() ?? template.Name;
         string name = CliSupport.RequireValue(console, settings.Name, "Name:", "NewFile", settings.Yes);
+        if (CliSupport.RejectFlagLike(name, "Name"))
+        {
+            return 1;
+        }
 
         WorkspaceContext workspace = await CliSupport
             .ResolveWorkspaceAsync(discovery, cancellationToken)
@@ -135,10 +135,24 @@ public static class ItemFlow
             .CreateAsync(templateShortName, name, projectDirectory, outputSubdir, projectFile, cancellationToken)
             .ConfigureAwait(false);
 
-        string createdPath = ResolveCreatedPath(projectDirectory, outputSubdir, name);
-        CliSupport.PrintOutcome(result, $"Created {createdPath}", $"would create {createdPath}");
-        CliSupport.CopyCommands(settings, result.CommandLine);
-        return 0;
+        if (CliSupport.IsFailed(result))
+        {
+            return CliSupport.FailMutation(result);
+        }
+
+        string targetDirectory = string.IsNullOrWhiteSpace(outputSubdir)
+            ? projectDirectory
+            : Path.Combine(projectDirectory, outputSubdir);
+        string? createdPath = result.DryRun
+            ? Path.Combine(targetDirectory, name)
+            : CreatedFileResolver.FindByBaseName(targetDirectory, name);
+        if (createdPath is null)
+        {
+            CliSupport.PrintError($"Could not find the created file for '{name}' under {targetDirectory}.");
+            return 1;
+        }
+
+        return CliSupport.FinishMutation(settings, result, $"Created {createdPath}", $"would create {createdPath}");
     }
 
     private static TemplateInfo? ResolveTemplate(
@@ -177,31 +191,4 @@ public static class ItemFlow
         return workspace.ClosestProjectPath;
     }
 
-    private static string ResolveCreatedPath(string projectDirectory, string? outputSubdir, string name)
-    {
-        string directory = string.IsNullOrWhiteSpace(outputSubdir)
-            ? projectDirectory
-            : Path.Combine(projectDirectory, outputSubdir);
-
-        try
-        {
-            string[] matches = Directory.Exists(directory)
-                ? Directory.GetFiles(directory, name + ".*")
-                : [];
-            if (matches.Length > 0)
-            {
-                return matches[0];
-            }
-        }
-        catch (IOException)
-        {
-            // Fall through to the conventional path.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Fall through to the conventional path.
-        }
-
-        return Path.Combine(directory, name);
-    }
 }

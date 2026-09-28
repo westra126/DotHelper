@@ -100,7 +100,7 @@ public sealed class DotnetRunner : IDotnetRunner
                 }
                 catch (Win32Exception)
                 {
-                    // Best-effort kill; the wait below still observes cancellation.
+                    // Best-effort kill; WaitForExitAsync below is also bounded by the token.
                 }
             },
             process);
@@ -111,7 +111,18 @@ public sealed class DotnetRunner : IDotnetRunner
         Task pumpOut = PumpAsync(process.StandardOutput, stdOut, onStdOutLine, cancellationToken);
         Task pumpErr = PumpAsync(process.StandardError, stdErr, onStdErrLine, cancellationToken);
 
-        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            // Safety net: if cancellation slips past the kill handler, do not wait forever.
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation is the caller's request: drain the pumps best-effort and propagate.
+            await DrainAsync(pumpOut, pumpErr).ConfigureAwait(false);
+            throw;
+        }
+
         await Task.WhenAll(pumpOut, pumpErr).ConfigureAwait(false);
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -142,6 +153,22 @@ public sealed class DotnetRunner : IDotnetRunner
             CommandLine = commandLine,
             DryRun = false,
         };
+    }
+
+    private static async Task DrainAsync(Task first, Task second)
+    {
+        try
+        {
+            await Task.WhenAll(first, second).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Pumps are cancelled together with the run.
+        }
+        catch (IOException)
+        {
+            // Best-effort drain after cancellation.
+        }
     }
 
     private static async Task PumpAsync(
@@ -196,6 +223,32 @@ public sealed class DotnetRunner : IDotnetRunner
             Directory.CreateDirectory(_logDirectory);
             string path = Path.Combine(_logDirectory, $"dothelper-{DateTime.Now:yyyyMMdd}.log");
             File.AppendAllText(path, $"{DateTime.UtcNow:O} {message}{Environment.NewLine}");
+            RestrictLogPermissions(path);
+        }
+        catch (IOException)
+        {
+            // Best-effort logging.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort logging.
+        }
+    }
+
+    /// <summary>
+    /// Logs may contain command lines and paths: create/read them with 0600 on Unix instead of
+    /// the umask default (0644). No-op on Windows.
+    /// </summary>
+    private static void RestrictLogPermissions(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
         catch (IOException)
         {

@@ -185,4 +185,14 @@ public sealed class WorkspaceLocatorTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void PathsEqual_is_case_insensitive_only_on_windows()
+    {
+        bool expected = OperatingSystem.IsWindows();
+
+        WorkspaceLocator.PathsEqual("/tmp/A", "/tmp/a").Should().Be(expected);
+        WorkspaceLocator.PathsEqual("/tmp/A", "/tmp/A").Should().BeTrue();
+        WorkspaceLocator.PathsEqual("/tmp/A", "/tmp/B").Should().BeFalse();
+    }
 }

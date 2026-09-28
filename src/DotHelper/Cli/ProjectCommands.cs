@@ -38,15 +38,7 @@ public sealed class ProjectListCommand : AsyncCommand<ProjectListSettings>
         ProjectListSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await ProjectListFlow.RunAsync(settings, listOnly: true, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await ProjectListFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -58,15 +50,7 @@ public sealed class ProjectAddRefCommand : AsyncCommand<ProjectAddRefSettings>
         ProjectAddRefSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await ProjectRefFlow.RunAsync(settings, remove: false, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await ProjectRefFlow.RunAsync(settings, remove: false, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -78,15 +62,7 @@ public sealed class ProjectRemoveRefCommand : AsyncCommand<ProjectRemoveRefSetti
         ProjectRemoveRefSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await ProjectRefFlow.RunAsync(settings, remove: true, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await ProjectRefFlow.RunAsync(settings, remove: true, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -95,7 +71,6 @@ public static class ProjectListFlow
 {
     public static async Task<int> RunAsync(
         WorkspaceCommandSettings settings,
-        bool listOnly,
         CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
@@ -177,12 +152,11 @@ public static class ProjectRefFlow
             : await projectService.AddReferenceAsync(from, to, cancellationToken).ConfigureAwait(false);
 
         string target = $"{Path.GetFileName(from)} → {Path.GetFileName(to)}";
-        CliSupport.PrintOutcome(
+        return CliSupport.FinishMutation(
+            settings,
             result,
             remove ? $"Removed reference {target}" : $"Added reference {target}",
             remove ? $"would remove reference {target}" : $"would add reference {target}");
-        CliSupport.CopyCommands(settings, result.CommandLine);
-        return 0;
     }
 
     private static string? ResolveSide(
@@ -201,7 +175,7 @@ public static class ProjectRefFlow
                 return full;
             }
 
-            // Allow selecting by file name (e.g. "Core.csproj") or by name fragment.
+            // Allow selecting by file name (e.g. "Core.csproj") or by project name (exact match).
             string? byName = projects.FirstOrDefault(p =>
                 Path.GetFileName(p).Equals(provided, StringComparison.OrdinalIgnoreCase) ||
                 Path.GetFileNameWithoutExtension(p).Equals(provided, StringComparison.OrdinalIgnoreCase));

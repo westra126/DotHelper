@@ -77,7 +77,7 @@ public sealed class FuzzyPickerTests
         // console, so only the redirected case is asserted.)
         if (!Console.IsInputRedirected)
         {
-            return;
+            Assert.Skip("The test host has a real TTY; the redirected-stdin contract needs redirected stdin.");
         }
 
         var console = new TestConsole();
@@ -94,6 +94,115 @@ public sealed class FuzzyPickerTests
         Action act = () => picker.Pick(TestContext.Current.CancellationToken);
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*interactive TTY*");
+    }
+
+    [Fact]
+    public void First_frame_is_painted_before_any_key_is_read()
+    {
+        // Fix (user report): the picker must render immediately, not wait for a keystroke.
+        var console = new TestConsole();
+        string outputAtFirstKey = string.Empty;
+        var keys = new ProbingKeyReader(() =>
+        {
+            outputAtFirstKey = console.Output;
+            return new ConsoleKeyInfo('\0', ConsoleKey.Escape, false, false, false);
+        });
+
+        NewPicker(console, keys).Pick(TestContext.Current.CancellationToken);
+
+        outputAtFirstKey.Should().Contain("Alpha", "the list must already be on screen");
+        outputAtFirstKey.Should().Contain("Enter select", "the hints must already be on screen");
+    }
+
+    [Fact]
+    public void Injected_key_reader_keeps_the_configured_page_size()
+    {
+        // Deterministic tests: a tiny console must NOT shrink the page when keys are injected.
+        var console = new TestConsole();
+        console.Height(8);
+        List<string> items = Enumerable.Range(1, 20).Select(static i => $"Item{i:00}").ToList();
+        var picker = new FuzzyPicker<string>(
+            console,
+            items,
+            new FuzzyPickerOptions<string>
+            {
+                PrimaryText = static s => s,
+                Fields = static s => [new WeightedField(s, WeightedField.NameWeight)],
+                Title = "demo",
+                PageSize = 12,
+                KeyReader = ScriptedKeyReader.From(ConsoleKey.Escape),
+            });
+
+        picker.Pick(TestContext.Current.CancellationToken);
+
+        console.Output.Should().Contain("Item12", "the configured page size (12) must be honoured");
+    }
+
+    [Fact]
+    public void Injected_key_reader_never_enters_the_alternate_screen()
+    {
+        var console = new TestConsole();
+        console.EmitAnsiSequences();
+        var picker = NewPicker(console, ScriptedKeyReader.From(ConsoleKey.Escape));
+
+        picker.Pick(TestContext.Current.CancellationToken);
+
+        console.Output.Should().NotContain("\u001b[?1049h", "tests must not touch the terminal buffer");
+        console.Output.Should().NotContain("\u001b[?1049l");
+    }
+
+    [Theory]
+    [InlineData(false, true, true, true, "real console on a capable terminal uses the alternate screen")]
+    [InlineData(true, true, true, false, "an injected key reader never touches the terminal buffer")]
+    [InlineData(false, false, true, false, "a terminal without ANSI degrades to the primary screen")]
+    [InlineData(false, true, false, false, "a terminal without alternate buffers degrades instead of throwing")]
+    [InlineData(false, false, false, false, "no capabilities at all degrades")]
+    public void Alternate_screen_requires_a_real_console_and_terminal_support(
+        bool hasInjectedKeyReader, bool ansi, bool alternateBuffer, bool expected, string because)
+    {
+        // Spectre's AlternateScreen throws NotSupportedException on capability-less terminals;
+        // the picker must fall back to the primary screen (RunLoop) in that case.
+        FuzzyPicker<string>.ShouldUseAlternateScreen(hasInjectedKeyReader, ansi, alternateBuffer)
+            .Should().Be(expected, because);
+    }
+
+    [Fact]
+    public void Detail_keeps_the_configured_page_size_with_an_injected_reader()
+    {
+        // Determinism contract: with an injected key reader the configured PageSize wins over
+        // the console height, so the detail block must NOT shrink the list here. The
+        // window-fitting case is covered by PickerLayoutTests (pure) and by the PTY evidence.
+        var console = new TestConsole();
+        console.Height(10);
+        List<string> items = Enumerable.Range(1, 20).Select(static i => $"Item{i:00}").ToList();
+        var picker = new FuzzyPicker<string>(
+            console,
+            items,
+            new FuzzyPickerOptions<string>
+            {
+                PrimaryText = static s => s,
+                Fields = static s => [new WeightedField(s, WeightedField.NameWeight)],
+                DetailLines = static _ => new[] { "d1", "d2", "d3", "d4", "d5" },
+                Title = "demo",
+                PageSize = 12,
+                KeyReader = ScriptedKeyReader.From(ConsoleKey.Tab, ConsoleKey.Escape),
+            });
+
+        picker.Pick(TestContext.Current.CancellationToken);
+
+        console.Output.Should().Contain("detail");
+        console.Output.Should().Contain("d5", "the whole detail block is shown");
+        console.Output.Should().Contain("Item12", "the configured page size is kept for tests");
+    }
+
+    /// <summary>Key reader that probes the console output at the first read.</summary>
+    private sealed class ProbingKeyReader : IKeyReader
+    {
+        private readonly Func<ConsoleKeyInfo> _onFirst;
+
+        public ProbingKeyReader(Func<ConsoleKeyInfo> onFirst) => _onFirst = onFirst;
+
+        public ConsoleKeyInfo ReadKey() => _onFirst();
     }
 
     private static FuzzyPicker<string> NewPicker(TestConsole console, IKeyReader keys) =>

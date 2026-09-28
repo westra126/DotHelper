@@ -360,6 +360,12 @@ public sealed class NugetService
         {
             throw new InvalidOperationException($"NuGet search failed: {ex.Message}", ex);
         }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // HttpClient timeouts surface as TaskCanceledException: report them as a friendly
+            // error instead of letting them read as a user cancellation ("Cancelled.", 130).
+            throw new InvalidOperationException("NuGet.org request timed out. Try again later.", ex);
+        }
 
         try
         {

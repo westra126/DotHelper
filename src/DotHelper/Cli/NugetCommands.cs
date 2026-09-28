@@ -33,7 +33,7 @@ public sealed class NugetAddSettings : WorkspaceCommandSettings
     [CommandArgument(0, "[package]")]
     public string? Package { get; init; }
 
-    /// <summary>Target project: full path, file name or name fragment.</summary>
+    /// <summary>Target project: full path, file name or project name.</summary>
     [CommandOption("--project <PROJ>")]
     public string? Project { get; init; }
 
@@ -81,20 +81,7 @@ public sealed class NugetSearchCommand : AsyncCommand<NugetSearchSettings>
         NugetSearchSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await NugetSearchFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
-        catch (InvalidOperationException ex)
-        {
-            CliSupport.PrintError(ex.Message);
-            return 1;
-        }
+        return await NugetSearchFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -106,20 +93,7 @@ public sealed class NugetAddCommand : AsyncCommand<NugetAddSettings>
         NugetAddSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await NugetAddFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
-        catch (InvalidOperationException ex)
-        {
-            CliSupport.PrintError(ex.Message);
-            return 1;
-        }
+        return await NugetAddFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -131,20 +105,7 @@ public sealed class NugetListCommand : AsyncCommand<NugetListSettings>
         NugetListSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await NugetListFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
-        catch (InvalidOperationException ex)
-        {
-            CliSupport.PrintError(ex.Message);
-            return 1;
-        }
+        return await NugetListFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -156,20 +117,7 @@ public sealed class NugetRemoveCommand : AsyncCommand<NugetRemoveSettings>
         NugetRemoveSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await NugetRemoveFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
-        catch (InvalidOperationException ex)
-        {
-            CliSupport.PrintError(ex.Message);
-            return 1;
-        }
+        return await NugetRemoveFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -257,7 +205,7 @@ public static class NugetFlow
 
     /// <summary>
     /// Resolves the target project: <paramref name="provided"/> (full path, file name or name
-    /// fragment) or the active workspace (solution projects, else the closest project) with a
+    /// name) or the active workspace (solution projects, else the closest project) with a
     /// picker when several candidates exist. Returns <c>null</c> when nothing matches.
     /// </summary>
     public static string? ResolveProject(
@@ -281,7 +229,7 @@ public static class NugetFlow
                 return full;
             }
 
-            // Allow selecting by file name (e.g. "Core.csproj") or by name fragment.
+            // Allow selecting by file name (e.g. "Core.csproj") or by project name (exact match).
             return candidates.FirstOrDefault(p =>
                 Path.GetFileName(p).Equals(provided, StringComparison.OrdinalIgnoreCase) ||
                 Path.GetFileNameWithoutExtension(p).Equals(provided, StringComparison.OrdinalIgnoreCase));
@@ -290,29 +238,6 @@ public static class NugetFlow
         return CliSupport.ChooseProject(console, candidates, "project", query, yes);
     }
 
-    /// <summary>
-    /// Handles a mutating result: friendly error on failure, otherwise the unified outcome line
-    /// (<c>Dry-run: would …</c> / success) plus the clipboard copy under <c>--print-cmd</c>.
-    /// </summary>
-    public static int Finish(
-        WorkspaceCommandSettings settings,
-        DotnetResult result,
-        string successMessage,
-        string wouldMessage)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        ArgumentNullException.ThrowIfNull(result);
-
-        if (!result.DryRun && result.ExitCode != 0)
-        {
-            CliSupport.PrintError(NugetService.DescribeError(result));
-            return 1;
-        }
-
-        CliSupport.PrintOutcome(result, successMessage, wouldMessage);
-        CliSupport.CopyCommands(settings, result.CommandLine);
-        return 0;
-    }
 }
 
 /// <summary>Flow for <c>dh nuget search</c>.</summary>
@@ -323,6 +248,11 @@ public static class NugetSearchFlow
         if (settings.Take < 1)
         {
             CliSupport.PrintError("--take must be greater than zero.");
+            return 1;
+        }
+
+        if (CliSupport.RejectFlagLike(settings.Term, "Search term"))
+        {
             return 1;
         }
 
@@ -407,7 +337,7 @@ public static class NugetAddFlow
             .ConfigureAwait(false);
 
         string target = Path.GetFileName(projectFile);
-        return NugetFlow.Finish(
+        return CliSupport.FinishMutation(
             settings,
             result,
             $"Added {resolved.Id} to {target}",
@@ -428,6 +358,11 @@ public static class NugetAddFlow
     {
         if (!string.IsNullOrWhiteSpace(settings.Package))
         {
+            if (CliSupport.RejectFlagLike(settings.Package, "Package id"))
+            {
+                return null;
+            }
+
             return new ResolvedPackage(
                 settings.Package!.Trim(),
                 string.IsNullOrWhiteSpace(settings.Version) ? null : settings.Version.Trim());
@@ -438,6 +373,11 @@ public static class NugetAddFlow
         string term;
         if (!string.IsNullOrWhiteSpace(settings.Query))
         {
+            if (CliSupport.RejectFlagLike(settings.Query, "Search term"))
+            {
+                return null;
+            }
+
             term = settings.Query!.Trim();
         }
         else if (!interactive)
@@ -592,6 +532,11 @@ public static class NugetRemoveFlow
         }
 
         string? packageId = settings.Package?.Trim();
+        if (!string.IsNullOrWhiteSpace(packageId) && CliSupport.RejectFlagLike(packageId, "Package id"))
+        {
+            return 1;
+        }
+
         if (string.IsNullOrWhiteSpace(packageId))
         {
             var searchService = new NugetService(discovery);
@@ -641,7 +586,7 @@ public static class NugetRemoveFlow
             .ConfigureAwait(false);
 
         string target = Path.GetFileName(projectFile);
-        return NugetFlow.Finish(
+        return CliSupport.FinishMutation(
             settings,
             result,
             $"Removed {packageId} from {target}",

@@ -225,6 +225,74 @@ public static class CliSupport
     }
 
     /// <summary>
+    /// True when a mutating <paramref name="result"/> failed: a real (non dry-run) run with a
+    /// non-zero exit code. Pure decision logic shared by every mutating flow.
+    /// </summary>
+    public static bool IsFailed(DotnetResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return !result.DryRun && result.ExitCode != 0;
+    }
+
+    /// <summary>Reports a failed mutation: friendly error line, no stack trace, exit code 1.</summary>
+    public static int FailMutation(DotnetResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        PrintError(NugetService.DescribeError(result));
+        return 1;
+    }
+
+    /// <summary>
+    /// Uniform end of a mutating flow: reports the failure (exit 1) when the <c>dotnet</c> run
+    /// failed, otherwise prints the outcome line and copies every equivalent command under
+    /// <c>--print-cmd</c> (PLAN.md §5.3 / §6e). <paramref name="extraCommandLines"/> are
+    /// commands of the same flow run earlier (e.g. the project create before add-to-sln).
+    /// </summary>
+    public static int FinishMutation(
+        WorkspaceCommandSettings settings,
+        DotnetResult result,
+        string successMessage,
+        string wouldMessage,
+        params string[] extraCommandLines)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(result);
+
+        if (IsFailed(result))
+        {
+            return FailMutation(result);
+        }
+
+        PrintOutcome(result, successMessage, wouldMessage);
+        string[] all = [.. extraCommandLines, result.CommandLine];
+        CopyCommands(settings, all);
+        return 0;
+    }
+
+    /// <summary>
+    /// True when a user-supplied value starts with <c>-</c> and could therefore be
+    /// mis-parsed as a flag by <c>dotnet</c> when forwarded positionally (names, package
+    /// ids, search terms). Paths are exempt: legitimate paths may start with a dash.
+    /// </summary>
+    public static bool LooksLikeFlag(string? value) =>
+        !string.IsNullOrEmpty(value) && value![0] == '-';
+
+    /// <summary>
+    /// Rejects user values that look like flags (leading <c>-</c>) before they reach
+    /// <c>dotnet</c>; returns false and prints a clear message otherwise.
+    /// </summary>
+    public static bool RejectFlagLike(string? value, string fieldName)
+    {
+        if (!LooksLikeFlag(value))
+        {
+            return false;
+        }
+
+        PrintError($"{fieldName} must not start with '-': {value}");
+        return true;
+    }
+
+    /// <summary>
     /// <c>--print-cmd</c> (PLAN.md §6e): copies the equivalent <c>dotnet</c> command(s) to the
     /// clipboard through <see cref="Clipboard"/> when available. Best-effort — a missing or broken
     /// clipboard tool never breaks the flow; only <c>--verbose</c> surfaces the reason.

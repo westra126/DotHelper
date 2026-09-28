@@ -79,6 +79,37 @@ public sealed class PolishTests
     }
 
     [Fact]
+    public void ClassCommand_preset_keeps_every_common_flag()
+    {
+        var settings = new ItemCommandSettings
+        {
+            Name = "Foo",
+            Query = "record",
+            PrintCmd = true,
+            DryRun = true,
+            Verbose = true,
+            Yes = true,
+        };
+
+        ItemCommandSettings preset = ClassCommand.PresetFor(settings);
+
+        preset.Query.Should().Be("record", "an explicit query is kept");
+        preset.Name.Should().Be("Foo");
+        preset.PrintCmd.Should().BeTrue("--print-cmd must survive the dh class preset");
+        preset.DryRun.Should().BeTrue();
+        preset.Verbose.Should().BeTrue();
+        preset.Yes.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ClassCommand_preset_defaults_the_query_to_class()
+    {
+        ItemCommandSettings preset = ClassCommand.PresetFor(new ItemCommandSettings());
+
+        preset.Query.Should().Be("class");
+    }
+
+    [Fact]
     public void InheritFrom_tolerates_a_null_source()
     {
         var target = new WorkspaceCommandSettings { DryRun = true };

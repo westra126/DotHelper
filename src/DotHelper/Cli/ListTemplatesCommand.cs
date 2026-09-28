@@ -88,17 +88,8 @@ public static class ListTemplatesFlow
             templates,
             TemplateSearch.PickerOptions());
 
-        TemplateInfo? selected;
-        try
-        {
-            selected = picker.Pick(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
-
+        // Cancellations reach the global handler (CommandErrors).
+        TemplateInfo? selected = picker.Pick(cancellationToken);
         if (selected is null)
         {
             AnsiConsole.WriteLine("Cancelled.");
@@ -182,14 +173,6 @@ public sealed class ListTemplatesCommand : AsyncCommand<ListTemplatesSettings>
         ListTemplatesSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await ListTemplatesFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await ListTemplatesFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -75,6 +75,19 @@ public sealed class PickerKeysTests
     }
 
     [Fact]
+    public void ClampScroll_uses_the_given_page_size_not_a_default()
+    {
+        // Selected row 10 with a 4-row window: the scroll must follow the window, not 12.
+        int selected = 10;
+        int scroll = 0;
+
+        FuzzyPicker<string>.ClampScroll(count: 20, ref selected, ref scroll, pageSize: 4);
+
+        selected.Should().Be(10);
+        scroll.Should().Be(7, "the window must end on the selected row (10 - 4 + 1)");
+    }
+
+    [Fact]
     public void ClampScroll_resets_when_there_are_no_items()
     {
         int selected = 7;

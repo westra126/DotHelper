@@ -177,7 +177,7 @@ public static class WizardDispatcher
             "references.remove" => ProjectRefFlow.RunAsync(New<ProjectAddRefSettings>(inherit), remove: true, cancellationToken),
 
             "list.templates" => ListTemplatesFlow.RunAsync(NewListTemplates(inherit), cancellationToken),
-            "list.projects" => ProjectListFlow.RunAsync(New<ProjectListSettings>(inherit), listOnly: true, cancellationToken),
+            "list.projects" => ProjectListFlow.RunAsync(New<ProjectListSettings>(inherit), cancellationToken),
             "list.solutions" => Task.FromResult(ListSolutionsFlow.Run()),
 
             _ => throw new InvalidOperationException($"Unknown wizard action '{item.Id}'."),

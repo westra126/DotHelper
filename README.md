@@ -57,6 +57,8 @@ Most commands operate on the *active workspace*: the nearest `.sln`/`.slnx` foun
 | `dh about` | Show DotHelper version and information |
 | `dh new solution [name] [--format sln\|slnx]` | Create a new solution (offers to add the first project right after) |
 | `dh new project [template] [--name <NAME>] [--output <DIR>] [--query <QUERY>] [--add-to-sln] [--no-add-to-sln]` | Create a new project from a `dotnet new` template |
+| `dh new item [template] [-n\|--name <NAME>] [--project <PROJ>] [--output <DIR>] [--query <QUERY>]` | Create a new item (class, record, interface, ...) inside a project (same as `dh item`) |
+| `dh new class` | Create a new class (alias of `dh new item` pre-loading the `class` query) |
 | `dh item [template] [-n\|--name <NAME>] [--project <PROJ>] [--output <DIR>] [--query <QUERY>]` | Create a new item (class, record, interface, ...) inside a project |
 | `dh class` | Create a new class (alias of `dh item` pre-loading the `class` query) |
 | `dh sln list` | List projects of the active solution |
@@ -78,6 +80,7 @@ Commands that operate on a workspace (`new`, `item`, `class`, `sln`, `project`, 
 - `--dry-run` — print the exact `dotnet ...` command instead of running mutating ones.
 - `-y`, `--yes` — never prompt: use the provided values, defaults, or the top-ranked picker result.
 - `--verbose` — log the stdout/stderr of every `dotnet` invocation to `~/.local/state/dothelper/logs/`.
+- `--print-cmd` — copy the equivalent `dotnet ...` command(s) of the flow to the clipboard via `wl-copy` (Wayland) or `pbcopy` (macOS); silently skipped when neither is available. The root wizard accepts it too and forwards it to the dispatched workspace flow.
 
 For `dh nuget add`, `--project` accepts a full path, a file name (`App.Api.csproj`) or a project name fragment. For `dh item`, `--project` expects a path to the project file (relative to the current directory is fine).
 
@@ -89,6 +92,7 @@ Every picker filters incrementally while you type, with matched characters highl
 - **Relevance cutoff** — 60 (default). Items below it are hidden; on ties the original order is kept, project templates rank before item templates, and NuGet results fall back to the most downloaded package.
 - **Keys** — `↑`/`↓` move, `Enter` selects, `Esc` cancels, `Tab` toggles template/package detail, type to filter, `Backspace` deletes, `Ctrl+C` aborts (exit code 130).
 - **`--query <q>`** — seeds the filter before the first frame. With stdin redirected there is no key I/O at all: the top-ranked match is returned directly, which is what makes scripting work. `dh list templates --query <q>` additionally prints a ranked table (top 15, with scores) instead of opening the picker.
+- **Full-screen** — while a picker is open it takes over the terminal's alternate screen and the previous screen is restored when it closes (on terminals without alternate-buffer support the picker stays on the current screen). The list is sized to the terminal height instead of a fixed page size, and shrinks while the Tab detail block is open.
 
 ## Non-interactive use, scripting and Neovim
 
@@ -105,6 +109,10 @@ dh item --query class -n CustomerId --project src/App.Domain/App.Domain.csproj -
 # preview what would run
 dh nuget add --query serilog --project App.Api --dry-run
 
+# preview and copy the exact dotnet command to the clipboard
+dh new project classlib --name X --yes --dry-run --print-cmd
+#   Clipboard: copied 1 command(s) via wl-copy   → dotnet new classlib -n X -o X
+
 # JSON output for scripts
 dh nuget search serilog --take 5 --json
 dh nuget list --project App.Api --json
@@ -115,6 +123,7 @@ Notes:
 
 - With `--yes`, missing values fall back to defaults (solution/project name `App`, item name `NewFile`, project root folder) and pickers resolve to the top-ranked candidate.
 - Read-only discovery (`dotnet new list`, `dotnet sln list`) always runs, even under `--dry-run`, because it is needed to resolve pickers and defaults.
+- `--print-cmd` copies the equivalent `dotnet ...` command(s) to the clipboard using the first available `wl-copy` (Wayland) or `pbcopy` (macOS). On X11 with neither tool installed nothing is copied — `xclip`/`xsel` are not supported — and the skip is silent unless `--verbose` is set.
 - Without a TTY, `dh` prints the help instead of hanging; with redirected stdin and a `--query`, pickers return the top-ranked match without waiting for keys.
 
 Inside Neovim:
@@ -126,6 +135,14 @@ Inside Neovim:
 ```
 
 Every flow also prints the equivalent `dotnet` line, so you can copy it and run it later as `:!dotnet ...`.
+
+## Exit codes
+
+- `0` — success.
+- `1` — the flow could not complete, for example because no solution/project was found or a picker was cancelled with `Esc` (nothing selected).
+- `130` — `Ctrl+C`, anywhere.
+
+The exception to `Esc` → `1` is the root wizard menu itself: cancelling there prints `Cancelled.` and exits `0`.
 
 ## Development
 
@@ -161,3 +178,7 @@ DotHelper/
 ## Disclaimer
 
 DotHelper is a community tool and is not affiliated with, endorsed by, or sponsored by Microsoft. .NET is a trademark of Microsoft Corporation.
+
+## License
+
+DotHelper is free software licensed under the GNU General Public License v3.0 or later (`GPL-3.0-or-later`). See [`LICENSE`](LICENSE) for the full text.

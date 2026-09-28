@@ -16,8 +16,9 @@
     <Authors>westra126</Authors>
     <RepositoryUrl>https://github.com/westra126/DotHelper</RepositoryUrl>
     <PackageProjectUrl>https://github.com/westra126/DotHelper</PackageProjectUrl>
-    <!-- README ships inside the nupkg (root). License intentionally pending (author decision). -->
+    <!-- README ships inside the nupkg (root). -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
 
     <!-- GenerateDocumentationFile intentionally NOT enabled in Phase 0:
          avoids CS1591 (missing XML docs) under TreatWarningsAsErrors. -->
@@ -31,6 +32,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DotHelper.Tests.Unit" />
+    <InternalsVisibleTo Include="DotHelper.Tests.Integration" />
   </ItemGroup>
 
   <ItemGroup>

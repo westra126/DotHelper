@@ -39,10 +39,19 @@ public sealed class DotnetRunnerTests
     }
 
     [Fact]
+    public void Default_log_directory_follows_the_plan()
+    {
+        // Pure computation (PLAN.md §6a): no file is written to the user home in tests.
+        string dir = DotnetRunner.DefaultLogDirectory();
+
+        dir.Should().EndWith(Path.Combine(".local", "state", "dothelper", "logs"));
+    }
+
+    [Fact]
     public async Task Real_execution_of_dotnet_version_succeeds()
     {
-        // Default log directory on purpose: exercises ~/.local/state/dothelper/logs (PLAN.md §6a).
-        var runner = new DotnetRunner();
+        using TempLogDir logDir = new();
+        var runner = new DotnetRunner(new DotnetRunnerOptions { LogDirectory = logDir.Path });
 
         DotnetResult result = await runner.RunAsync(
             new[] { "--version" },
@@ -85,7 +94,8 @@ public sealed class DotnetRunnerTests
     [Fact]
     public async Task Streams_stdout_lines_via_callback()
     {
-        var runner = new DotnetRunner();
+        using TempLogDir logDir = new();
+        var runner = new DotnetRunner(new DotnetRunnerOptions { LogDirectory = logDir.Path });
         List<string> lines = [];
 
         await runner.RunAsync(
@@ -126,6 +136,29 @@ public sealed class DotnetRunnerTests
         string[] files = Directory.GetFiles(logDir.Path);
         files.Should().ContainSingle();
         Path.GetFileName(files[0]).Should().Be($"dothelper-{DateTime.Now:yyyyMMdd}.log");
+    }
+
+    [Fact]
+    public async Task Log_file_is_private_on_unix()
+    {
+        // Fase 6 review: logs may hold command lines/paths — 0600, not the umask default.
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix file modes do not apply on Windows.");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            using TempLogDir logDir = new();
+            var runner = new DotnetRunner(new DotnetRunnerOptions { LogDirectory = logDir.Path });
+
+            await runner.RunAsync(new[] { "--version" }, workingDir: null, cancellationToken: CancellationToken.None);
+
+            string file = Directory.GetFiles(logDir.Path)[0];
+            UnixFileMode mode = File.GetUnixFileMode(file);
+
+            mode.Should().Be(UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
     }
 
     [Fact]

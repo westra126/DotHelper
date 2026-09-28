@@ -2,6 +2,8 @@ using DotHelper.Core.Dotnet;
 
 using FluentAssertions;
 
+using NSubstitute;
+
 namespace DotHelper.Tests.Unit;
 
 public sealed class NugetServiceTests
@@ -166,6 +168,37 @@ public sealed class NugetServiceTests
 
         uri.Should().StartWith(NugetService.AzureSearchEndpoint + "?q=json%20%26%20co");
         uri.Should().EndWith("&take=5&prerelease=true");
+    }
+
+    [Fact]
+    public async Task Search_http_timeout_is_reported_as_a_friendly_error()
+    {
+        IDotnetRunner runner = Substitute.For<IDotnetRunner>();
+        runner.RunAsync(
+                Arg.Any<IEnumerable<string>>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<Action<string>?>(),
+                Arg.Any<Action<string>?>())
+            .Returns(Result(exitCode: 1, stdErr: "Could not execute because the specified command or file was not found."));
+        using var http = new HttpClient(new TimeoutHandler());
+        var service = new NugetService(runner, http);
+
+        Func<Task> act = () => service.SearchAsync("json", take: 3);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*timed out*");
+    }
+
+    /// <summary>Simulates the HttpClient timeout: TaskCanceledException without user cancellation.</summary>
+    private sealed class TimeoutHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            throw new TaskCanceledException("simulated timeout");
+        }
     }
 
     private static DotnetResult Result(int exitCode, string stdOut = "", string stdErr = "") =>

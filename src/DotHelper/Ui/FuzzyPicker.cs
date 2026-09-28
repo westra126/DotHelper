@@ -109,12 +109,53 @@ public sealed class FuzzyPicker<T>
 
         try
         {
+            // Alternate screen (Spectre.Console 0.55 extension
+            // `AnsiConsoleExtensions.AlternateScreen(IAnsiConsole, Action)`): the picker owns the
+            // whole window while it is open and the previous screen — with the flow messages
+            // printed afterwards — is restored when the action returns or throws (Spectre emits
+            // the exit sequence in a finally; verified in the Spectre source). Only for the real
+            // console: an injected key reader (tests) must not touch the terminal buffer. And only
+            // when the terminal supports it: Spectre throws NotSupportedException otherwise
+            // (also verified in the source), so capability-less terminals degrade to the primary
+            // screen instead of crashing.
+            if (ShouldUseAlternateScreen(
+                    hasInjectedKeyReader: injected is not null,
+                    ansi: _console.Profile.Capabilities.Ansi,
+                    alternateBuffer: _console.Profile.Capabilities.AlternateBuffer))
+            {
+                _console.AlternateScreen(() => RunLoop());
+            }
+            else
+            {
+                RunLoop();
+            }
+        }
+        finally
+        {
+            if (injected is null)
+            {
+                Console.TreatControlCAsInput = previousTreatControlCAsInput;
+            }
+        }
+
+        return result;
+
+        // Local function so the alternate-screen action can mutate the loop state.
+        void RunLoop()
+        {
+            PickerLayout layout = EffectiveLayout(showDetail, ranked, selectedIndex, injected);
+
             LiveDisplay live = _console
-                .Live(BuildView(query, ranked, selectedIndex, scrollOffset, showDetail))
+                .Live(BuildView(query, ranked, selectedIndex, scrollOffset, showDetail, layout))
                 .AutoClear(true);
 
             live.Start(ctx =>
             {
+                // Fix (user report): paint the first frame before reading any key, so the UI is
+                // visible immediately instead of waiting for the first keystroke.
+                ctx.UpdateTarget(BuildView(query, ranked, selectedIndex, scrollOffset, showDetail, layout));
+                ctx.Refresh();
+
                 while (!done)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -178,32 +219,100 @@ public sealed class FuzzyPicker<T>
 
                     if (!done)
                     {
-                        ClampScroll(ranked.Count, ref selectedIndex, ref scrollOffset);
-                        ctx.UpdateTarget(BuildView(query, ranked, selectedIndex, scrollOffset, showDetail));
+                        // Recompute the layout each frame: Tab toggles the detail block, which
+                        // steals rows from the list so the view never overflows the window.
+                        layout = EffectiveLayout(showDetail, ranked, selectedIndex, injected);
+                        ClampScroll(ranked.Count, ref selectedIndex, ref scrollOffset, layout.PageSize);
+                        ctx.UpdateTarget(BuildView(query, ranked, selectedIndex, scrollOffset, showDetail, layout));
                         ctx.Refresh();
                     }
                 }
             });
         }
-        finally
-        {
-            if (injected is null)
-            {
-                Console.TreatControlCAsInput = previousTreatControlCAsInput;
-            }
-        }
 
-        return result;
     }
 
     private IReadOnlyList<ScoredItem<T>> RankItems(string query) =>
         FuzzyScorer.Rank(query, _items, _options.Fields, _options.Cutoff, _options.Tiebreak);
 
+    /// <summary>
+    /// Pure: the alternate screen is only entered when the real console drives the loop (no
+    /// injected key reader) AND the terminal actually supports alternate buffers — Spectre's
+    /// <c>AlternateScreen</c> throws <see cref="NotSupportedException"/> when either ANSI or the
+    /// alternate buffer is missing, so those terminals keep the previous primary-screen behavior.
+    /// </summary>
+    internal static bool ShouldUseAlternateScreen(bool hasInjectedKeyReader, bool ansi, bool alternateBuffer) =>
+        !hasInjectedKeyReader && ansi && alternateBuffer;
+
+    /// <summary>
+    /// Window layout for one frame (Fase: full-height picker). With an injected key reader the
+    /// configured <c>PageSize</c> is kept for deterministic tests; with the real console the page
+    /// size is derived from the console height so the picker fills the window, shrinking the list
+    /// when the Tab detail block is open so nothing overflows.
+    /// </summary>
+    private PickerLayout EffectiveLayout(bool showDetail, IReadOnlyList<ScoredItem<T>> ranked, int selectedIndex, IKeyReader? injected)
+    {
+        int detailLines = 0;
+        if (showDetail && ranked.Count > 0 && selectedIndex < ranked.Count)
+        {
+            detailLines = _options.DetailLines?.Invoke(ranked[selectedIndex].Item)?.Count ?? 0;
+        }
+
+        return injected is not null
+            ? new PickerLayout(_options.PageSize, detailLines)
+            : ComputeLayout(_console.Profile.Height, _options.PageSize, showDetail, detailLines, ranked.Count);
+    }
+
     private static T? Current(IReadOnlyList<ScoredItem<T>> ranked, int selectedIndex) =>
         selectedIndex >= 0 && selectedIndex < ranked.Count ? ranked[selectedIndex].Item : default;
 
-    /// <summary>Keeps the selected row inside the visible window (pure, testable).</summary>
-    internal static void ClampScroll(int count, ref int selectedIndex, ref int scrollOffset, int pageSize = 12)
+    /// <summary>
+    /// Pure: sizes the list window so the whole view fits the console. Lines used besides the
+    /// list: title+query (1), hints (1) and one spare line at the bottom (Live borders); the
+    /// detail block (rule + lines) and the <c>n/total</c> counter appear only when present.
+    /// When the detail block would push the list out of the window, detail lines are dropped
+    /// first so at least one list row and the hints/counter stay visible.
+    /// </summary>
+    /// <param name="consoleHeight">Console height; ≤ 0 means unknown → keep the configured size.</param>
+    internal static PickerLayout ComputeLayout(
+        int consoleHeight,
+        int configuredPageSize,
+        bool showDetail,
+        int detailLineCount,
+        int itemCount)
+    {
+        if (consoleHeight <= 0)
+        {
+            return new PickerLayout(configuredPageSize, showDetail ? Math.Max(0, detailLineCount) : 0);
+        }
+
+        const int fixedLines = 3; // title+query, hints, spare line at the bottom
+        int wantedDetail = showDetail ? Math.Max(0, detailLineCount) : 0;
+        int detailBlock = showDetail ? 1 : 0; // the "detail" rule
+
+        for (int detail = wantedDetail; detail >= 0; detail--)
+        {
+            int page = consoleHeight - fixedLines - detailBlock - detail;
+            if (itemCount > page)
+            {
+                page -= 1; // the n/total counter needs one line
+            }
+
+            if (page >= 1)
+            {
+                return new PickerLayout(page, showDetail ? detail : 0);
+            }
+        }
+
+        // Absurdly small window: keep a single row and drop the detail entirely.
+        return new PickerLayout(1, 0);
+    }
+
+    /// <summary>
+    /// Keeps the selected row inside the visible window (pure, testable). The page size is
+    /// required on purpose: callers must forward the computed layout, never a default.
+    /// </summary>
+    internal static void ClampScroll(int count, ref int selectedIndex, ref int scrollOffset, int pageSize)
     {
         if (count <= 0)
         {
@@ -243,7 +352,8 @@ public sealed class FuzzyPicker<T>
         IReadOnlyList<ScoredItem<T>> ranked,
         int selectedIndex,
         int scrollOffset,
-        bool showDetail)
+        bool showDetail,
+        PickerLayout layout)
     {
         List<IRenderable> elements = [];
 
@@ -257,7 +367,7 @@ public sealed class FuzzyPicker<T>
         }
         else
         {
-            int end = Math.Min(scrollOffset + _options.PageSize, ranked.Count);
+            int end = Math.Min(scrollOffset + layout.PageSize, ranked.Count);
             for (int i = scrollOffset; i < end; i++)
             {
                 T item = ranked[i].Item;
@@ -276,7 +386,7 @@ public sealed class FuzzyPicker<T>
                 }
             }
 
-            if (ranked.Count > _options.PageSize)
+            if (ranked.Count > layout.PageSize)
             {
                 elements.Add(new Markup(
                     $"[{Theme.MutedMarkup}]{selectedIndex + 1}/{ranked.Count}[/]"));
@@ -285,11 +395,15 @@ public sealed class FuzzyPicker<T>
 
         if (showDetail && ranked.Count > 0 && selectedIndex < ranked.Count)
         {
-            elements.Add(new Rule($"[{Theme.MutedMarkup}]detail[/]").RuleStyle(Style.Plain));
             IReadOnlyList<string> detail = _options.DetailLines?.Invoke(ranked[selectedIndex].Item) ?? [];
-            foreach (string line in detail)
+            if (detail.Count > 0 && layout.DetailLineLimit > 0)
             {
-                elements.Add(new Markup($"[{Theme.MutedMarkup}]{Markup.Escape(line)}[/]"));
+                elements.Add(new Rule($"[{Theme.MutedMarkup}]detail[/]").RuleStyle(Style.Plain));
+                int shown = Math.Min(detail.Count, layout.DetailLineLimit);
+                for (int i = 0; i < shown; i++)
+                {
+                    elements.Add(new Markup($"[{Theme.MutedMarkup}]{Markup.Escape(detail[i])}[/]"));
+                }
             }
         }
 
@@ -318,3 +432,9 @@ public sealed class FuzzyPicker<T>
         return sb.ToString();
     }
 }
+
+/// <summary>
+/// Window layout of one picker frame (Fase: full-height picker): how many list rows fit and how
+/// many detail lines may be shown without overflowing the console.
+/// </summary>
+internal readonly record struct PickerLayout(int PageSize, int DetailLineLimit);

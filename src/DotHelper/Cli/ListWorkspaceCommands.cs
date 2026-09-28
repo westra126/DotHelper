@@ -63,14 +63,6 @@ public sealed class ListProjectsCommand : AsyncCommand<ListProjectsSettings>
         ListProjectsSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await ProjectListFlow.RunAsync(settings, listOnly: true, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await ProjectListFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }

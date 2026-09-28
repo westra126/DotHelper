@@ -17,6 +17,10 @@ app.Configure(config =>
     config.Settings.ApplicationVersion = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
     config.Settings.CancellationExitCode = 130;
 
+    // Fase 6 review M2: one global handler for every command (and the wizard dispatcher):
+    // cancellations exit 130, everything else prints a friendly Error line and exits 1.
+    config.SetExceptionHandler((exception, _) => CommandErrors.Handle(exception));
+
     config.AddCommand<AboutCommand>("about")
         .WithDescription("Show DotHelper version and information");
 
@@ -28,11 +32,15 @@ app.Configure(config =>
 
     config.AddBranch("new", nw =>
     {
-        nw.SetDescription("Create a new solution or project");
+        nw.SetDescription("Create a new solution, project or item");
         nw.AddCommand<NewSolutionCommand>("solution")
             .WithDescription("Create a new solution");
         nw.AddCommand<NewProjectCommand>("project")
             .WithDescription("Create a new project from a template");
+        nw.AddCommand<ItemCommand>("item")
+            .WithDescription("Create a new item (class, record, interface, ...) inside a project");
+        nw.AddCommand<ClassCommand>("class")
+            .WithDescription("Create a new class (alias of 'dh new item' pre-loading the class query)");
     });
 
     config.AddBranch("sln", sln =>

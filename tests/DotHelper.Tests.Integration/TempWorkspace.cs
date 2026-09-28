@@ -12,7 +12,11 @@ public sealed class TempWorkspace : IDisposable
     {
         Root = Path.Combine(Path.GetTempPath(), "dothelper-it-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Root);
-        Runner = new DotnetRunner();
+        // Keep the run log inside the temp workspace: tests must not write to the user home.
+        Runner = new DotnetRunner(new DotnetRunnerOptions
+        {
+            LogDirectory = Path.Combine(Root, "logs"),
+        });
         Solutions = new SolutionService(Runner);
         Projects = new ProjectService(Runner);
         Items = new ItemService(Runner);

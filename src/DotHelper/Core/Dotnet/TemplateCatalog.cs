@@ -24,7 +24,8 @@ public sealed class TemplateCatalog
 
     /// <summary>
     /// Returns the template catalog, using an in-process cache (default TTL: 10 minutes).
-    /// A non-zero exit code with empty stdout (the "no templates found" case) yields an empty list.
+    /// Only successful runs are cached; a failed <c>dotnet new list</c> raises a friendly
+    /// <see cref="InvalidOperationException"/> (Fase 6 review) and is retried next call.
     /// </summary>
     public async Task<IReadOnlyList<TemplateInfo>> GetTemplatesAsync(CancellationToken cancellationToken = default)
     {
@@ -36,6 +37,12 @@ public sealed class TemplateCatalog
         DotnetResult result = await _runner
             .RunAsync(ListArgs, workingDir: null, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
+
+        if (result.ExitCode != 0)
+        {
+            // Never cache failures: the next call must retry the CLI.
+            throw new InvalidOperationException(NugetService.DescribeError(result));
+        }
 
         IReadOnlyList<TemplateInfo> templates = TemplateListParser.Parse(result.StdOut);
 

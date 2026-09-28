@@ -39,15 +39,7 @@ public sealed class SlnListCommand : AsyncCommand<SlnListSettings>
         SlnListSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await ProjectListFlow.RunAsync(settings, listOnly: true, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await ProjectListFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -59,58 +51,52 @@ public sealed class SlnAddCommand : AsyncCommand<SlnAddSettings>
         SlnAddSettings settings,
         CancellationToken cancellationToken)
     {
-        try
+        IAnsiConsole console = AnsiConsole.Console;
+        IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
+        IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
+
+        WorkspaceContext workspace = await CliSupport
+            .ResolveWorkspaceAsync(discovery, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (workspace.SolutionPath is null)
         {
-            IAnsiConsole console = AnsiConsole.Console;
-            IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
-            IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
-
-            WorkspaceContext workspace = await CliSupport
-                .ResolveWorkspaceAsync(discovery, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (workspace.SolutionPath is null)
-            {
-                CliSupport.PrintError("No solution found (looking for .sln/.slnx upwards).");
-                return 1;
-            }
-
-            string slnDir = Path.GetDirectoryName(workspace.SolutionPath)!;
-            var solutionService = new SolutionService(discovery);
-            IReadOnlyList<string> inSln = await solutionService
-                .ListProjectsAsync(workspace.SolutionPath, cancellationToken)
-                .ConfigureAwait(false);
-
-            HashSet<string> already = new(inSln.Select(p => Path.GetFullPath(Path.Combine(slnDir, p))), StringComparer.Ordinal);
-
-            IReadOnlyList<string> candidates = WorkspaceScanner.FindProjects(slnDir)
-                .Where(p => !already.Contains(p))
-                .ToList();
-
-            string? projectPath = ResolveProject(console, settings.Project, candidates, settings.Query, settings.Yes);
-            if (projectPath is null)
-            {
-                CliSupport.PrintError(candidates.Count == 0
-                    ? "No candidate projects found under the solution root."
-                    : "No project selected.");
-                return 1;
-            }
-
-            var mutatingSolution = new SolutionService(mutating);
-            DotnetResult result = await mutatingSolution
-                .AddProjectAsync(workspace.SolutionPath, projectPath, cancellationToken)
-                .ConfigureAwait(false);
-
-            string slnName = Path.GetFileName(workspace.SolutionPath);
-            CliSupport.PrintOutcome(result, $"Added {projectPath} to {slnName}", $"would add {projectPath} to {slnName}");
-            CliSupport.CopyCommands(settings, result.CommandLine);
-            return 0;
+            CliSupport.PrintError("No solution found (looking for .sln/.slnx upwards).");
+            return 1;
         }
-        catch (OperationCanceledException)
+
+        string slnDir = Path.GetDirectoryName(workspace.SolutionPath)!;
+        var solutionService = new SolutionService(discovery);
+        IReadOnlyList<string> inSln = await solutionService
+            .ListProjectsAsync(workspace.SolutionPath, cancellationToken)
+            .ConfigureAwait(false);
+
+        HashSet<string> already = new(inSln.Select(p => Path.GetFullPath(Path.Combine(slnDir, p))), StringComparer.Ordinal);
+
+        IReadOnlyList<string> candidates = WorkspaceScanner.FindProjects(slnDir)
+            .Where(p => !already.Contains(p))
+            .ToList();
+
+        string? projectPath = ResolveProject(console, settings.Project, candidates, settings.Query, settings.Yes);
+        if (projectPath is null)
         {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
+            CliSupport.PrintError(candidates.Count == 0
+                ? "No candidate projects found under the solution root."
+                : "No project selected.");
+            return 1;
         }
+
+        var mutatingSolution = new SolutionService(mutating);
+        DotnetResult result = await mutatingSolution
+            .AddProjectAsync(workspace.SolutionPath, projectPath, cancellationToken)
+            .ConfigureAwait(false);
+
+        string slnName = Path.GetFileName(workspace.SolutionPath);
+        return CliSupport.FinishMutation(
+            settings,
+            result,
+            $"Added {projectPath} to {slnName}",
+            $"would add {projectPath} to {slnName}");
     }
 
     internal static string? ResolveProject(
@@ -138,45 +124,39 @@ public sealed class SlnRemoveCommand : AsyncCommand<SlnRemoveSettings>
         SlnRemoveSettings settings,
         CancellationToken cancellationToken)
     {
-        try
+        IAnsiConsole console = AnsiConsole.Console;
+        IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
+        IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
+
+        WorkspaceContext workspace = await CliSupport
+            .ResolveWorkspaceAsync(discovery, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (workspace.SolutionPath is null)
         {
-            IAnsiConsole console = AnsiConsole.Console;
-            IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
-            IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
-
-            WorkspaceContext workspace = await CliSupport
-                .ResolveWorkspaceAsync(discovery, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (workspace.SolutionPath is null)
-            {
-                CliSupport.PrintError("No solution found (looking for .sln/.slnx upwards).");
-                return 1;
-            }
-
-            string? projectPath = SlnAddCommand.ResolveProject(
-                console, settings.Project, workspace.SolutionProjectPaths, settings.Query, settings.Yes);
-
-            if (projectPath is null)
-            {
-                CliSupport.PrintError("No project selected.");
-                return 1;
-            }
-
-            var solutionService = new SolutionService(mutating);
-            DotnetResult result = await solutionService
-                .RemoveProjectAsync(workspace.SolutionPath, projectPath, cancellationToken)
-                .ConfigureAwait(false);
-
-            string slnName = Path.GetFileName(workspace.SolutionPath);
-            CliSupport.PrintOutcome(result, $"Removed {projectPath} from {slnName}", $"would remove {projectPath} from {slnName}");
-            CliSupport.CopyCommands(settings, result.CommandLine);
-            return 0;
+            CliSupport.PrintError("No solution found (looking for .sln/.slnx upwards).");
+            return 1;
         }
-        catch (OperationCanceledException)
+
+        string? projectPath = SlnAddCommand.ResolveProject(
+            console, settings.Project, workspace.SolutionProjectPaths, settings.Query, settings.Yes);
+
+        if (projectPath is null)
         {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
+            CliSupport.PrintError("No project selected.");
+            return 1;
         }
+
+        var solutionService = new SolutionService(mutating);
+        DotnetResult result = await solutionService
+            .RemoveProjectAsync(workspace.SolutionPath, projectPath, cancellationToken)
+            .ConfigureAwait(false);
+
+        string slnName = Path.GetFileName(workspace.SolutionPath);
+        return CliSupport.FinishMutation(
+            settings,
+            result,
+            $"Removed {projectPath} from {slnName}",
+            $"would remove {projectPath} from {slnName}");
     }
 }

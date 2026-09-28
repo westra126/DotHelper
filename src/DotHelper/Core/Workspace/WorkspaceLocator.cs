@@ -145,6 +145,10 @@ public static class WorkspaceLocator
         }
     }
 
-    private static bool PathsEqual(string a, string b) =>
-        string.Equals(a, b, StringComparison.Ordinal);
+    /// <summary>
+    /// Path comparison for the walk boundary: ordinal everywhere, case-insensitive on Windows
+    /// where paths are case-insensitive too.
+    /// </summary>
+    internal static bool PathsEqual(string a, string b) =>
+        string.Equals(a, b, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }

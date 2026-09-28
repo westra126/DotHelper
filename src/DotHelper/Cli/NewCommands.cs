@@ -50,15 +50,7 @@ public sealed class NewSolutionCommand : AsyncCommand<NewSolutionSettings>
         NewSolutionSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await NewSolutionFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await NewSolutionFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -70,15 +62,7 @@ public sealed class NewProjectCommand : AsyncCommand<NewProjectSettings>
         NewProjectSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            return await NewProjectFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        return await NewProjectFlow.RunAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -89,6 +73,11 @@ public static class NewSolutionFlow
     {
         IAnsiConsole console = AnsiConsole.Console;
         string name = CliSupport.RequireValue(console, settings.Name, "Solution name:", "App", settings.Yes);
+        if (CliSupport.RejectFlagLike(name, "Solution name"))
+        {
+            return 1;
+        }
+
         SlnFormat format = ParseFormat(settings.Format);
 
         IDotnetRunner runner = CliSupport.CreateMutatingRunner(settings);
@@ -99,8 +88,12 @@ public static class NewSolutionFlow
             .ConfigureAwait(false);
 
         string solutionFile = $"{name}.{(format == SlnFormat.Slnx ? "slnx" : "sln")}";
-        CliSupport.PrintOutcome(result, $"Created {solutionFile}", $"would create {solutionFile}");
-        CliSupport.CopyCommands(settings, result.CommandLine);
+        int outcome = CliSupport.FinishMutation(
+            settings, result, $"Created {solutionFile}", $"would create {solutionFile}");
+        if (outcome != 0)
+        {
+            return outcome;
+        }
 
         if (settings.Yes || settings.DryRun)
         {
@@ -122,7 +115,11 @@ public static class NewSolutionFlow
         return 0;
     }
 
-    private static SlnFormat ParseFormat(string? format) =>
+    /// <summary>
+    /// Parses <c>--format</c> (internal for tests). Unknown values raise a friendly
+    /// <see cref="InvalidOperationException"/> that the command layer maps to exit 1.
+    /// </summary>
+    internal static SlnFormat ParseFormat(string? format) =>
         format?.Trim().ToLowerInvariant() switch
         {
             null or "" or "sln" => SlnFormat.Sln,
@@ -156,6 +153,10 @@ public static class NewProjectFlow
 
         string templateShortName = template.ShortNames.FirstOrDefault() ?? template.Name;
         string name = CliSupport.RequireValue(console, settings.Name, "Project name:", "App", settings.Yes);
+        if (CliSupport.RejectFlagLike(name, "Project name"))
+        {
+            return 1;
+        }
 
         WorkspaceContext workspace = await CliSupport
             .ResolveWorkspaceAsync(discovery, cancellationToken)
@@ -175,7 +176,23 @@ public static class NewProjectFlow
             .CreateAsync(templateShortName, name, projectDirectory, cancellationToken)
             .ConfigureAwait(false);
 
-        string projectFile = Path.Combine(projectDirectory, name + ".csproj");
+        // A failed create must be reported as such: never add-to-sln, never claim success.
+        if (CliSupport.IsFailed(create))
+        {
+            return CliSupport.FailMutation(create);
+        }
+
+        // Resolve the created project file instead of assuming ".csproj" (classlib may be
+        // created as fsproj/vbproj): deterministic <name>.*proj lookup, clear error otherwise.
+        string? projectFile = create.DryRun
+            ? Path.Combine(projectDirectory, name + ".csproj")
+            : CreatedFileResolver.FindProjectFile(projectDirectory, name);
+        if (projectFile is null)
+        {
+            CliSupport.PrintError($"Could not find the created project file ({name}.*proj) under {projectDirectory}.");
+            return 1;
+        }
+
         CliSupport.PrintOutcome(create, $"Created {projectFile}", $"would create {projectFile}");
 
         bool shouldAdd = settings.AddToSln ||
@@ -188,19 +205,21 @@ public static class NewProjectFlow
                 .AddProjectAsync(workspace.SolutionPath, projectFile, cancellationToken)
                 .ConfigureAwait(false);
             string slnName = Path.GetFileName(workspace.SolutionPath);
-            CliSupport.PrintOutcome(add, $"Added to {slnName}", $"would add to {slnName}");
-            CliSupport.CopyCommands(settings, create.CommandLine, add.CommandLine);
+            return CliSupport.FinishMutation(
+                settings,
+                add,
+                $"Added to {slnName}",
+                $"would add to {slnName}",
+                create.CommandLine);
         }
-        else if (settings.AddToSln && workspace.SolutionPath is null)
+
+        if (settings.AddToSln && workspace.SolutionPath is null)
         {
             CliSupport.PrintError("No solution found to add the project to.");
             return 1;
         }
-        else
-        {
-            CliSupport.CopyCommands(settings, create.CommandLine);
-        }
 
+        CliSupport.CopyCommands(settings, create.CommandLine);
         return 0;
     }
 

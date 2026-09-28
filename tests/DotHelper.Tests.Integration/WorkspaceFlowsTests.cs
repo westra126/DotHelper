@@ -1,7 +1,11 @@
+using DotHelper.Cli;
 using DotHelper.Core.Dotnet;
 using DotHelper.Core.Workspace;
 
 using FluentAssertions;
+
+using Spectre.Console;
+using Spectre.Console.Testing;
 
 namespace DotHelper.Tests.Integration;
 
@@ -143,5 +147,97 @@ public sealed class WorkspaceFlowsTests
 
         projects.Should().HaveCount(2);
         projects.Should().OnlyContain(p => p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task New_project_twice_fails_the_second_time_with_a_friendly_error()
+    {
+        // M1 review: the second `dotnet new` over an existing project fails (exit 73) and the
+        // flow must report exit 1 with an Error line — never "Created" + exit 0.
+        using TempWorkspace ws = new();
+        string previousDirectory = Directory.GetCurrentDirectory();
+        IAnsiConsole previousConsole = AnsiConsole.Console;
+        var console = new TestConsole();
+        AnsiConsole.Console = console;
+        try
+        {
+            Directory.SetCurrentDirectory(ws.Root);
+
+            int first = await NewProjectFlow.RunAsync(
+                new NewProjectSettings
+                {
+                    Template = "classlib",
+                    Name = "P",
+                    Yes = true,
+                    NoAddToSln = true,
+                },
+                Ct);
+            first.Should().Be(0);
+            console.Output.Should().Contain("Created");
+            File.Exists(ws.PathTo("P", "P.csproj")).Should().BeTrue();
+
+            console = new TestConsole();
+            AnsiConsole.Console = console;
+            int second = await NewProjectFlow.RunAsync(
+                new NewProjectSettings
+                {
+                    Template = "classlib",
+                    Name = "P",
+                    Yes = true,
+                    NoAddToSln = true,
+                },
+                Ct);
+
+            second.Should().Be(1, "the failed create must surface as a failing exit code");
+            console.Output.Should().Contain("Error:");
+            console.Output.Should().NotContain("✔", "a failed run must not claim success");
+        }
+        finally
+        {
+            AnsiConsole.Console = previousConsole;
+            Directory.SetCurrentDirectory(previousDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task New_item_from_the_new_branch_creates_the_file()
+    {
+        // `dh new item class --name Foo --project <proj> --yes` — same command class as
+        // `dh item`, registered under the `new` branch (PLAN.md §4).
+        using TempWorkspace ws = new();
+        string project = await ws.CreateProjectAsync("classlib", "Lib", "src");
+
+        int exit = await ItemFlow.RunAsync(
+            new ItemCommandSettings
+            {
+                Template = "class",
+                Name = "Foo",
+                Project = project,
+                Yes = true,
+            },
+            Ct);
+
+        exit.Should().Be(0);
+        File.Exists(Path.Combine(Path.GetDirectoryName(project)!, "Foo.cs")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task New_class_from_the_new_branch_creates_the_file()
+    {
+        // `dh new class --name Bar --project <proj> --yes` — ClassCommand preset (query "class").
+        using TempWorkspace ws = new();
+        string project = await ws.CreateProjectAsync("classlib", "Lib", "src");
+
+        ItemCommandSettings preset = ClassCommand.PresetFor(new ItemCommandSettings
+        {
+            Name = "Bar",
+            Project = project,
+            Yes = true,
+        });
+        int exit = await ItemFlow.RunAsync(preset, Ct);
+
+        exit.Should().Be(0);
+        preset.Query.Should().Be("class", "dh new class pre-loads the class query");
+        File.Exists(Path.Combine(Path.GetDirectoryName(project)!, "Bar.cs")).Should().BeTrue();
     }
 }

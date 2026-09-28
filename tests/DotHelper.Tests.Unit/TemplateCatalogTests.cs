@@ -66,6 +66,64 @@ public sealed class TemplateCatalogTests
         templates.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task GetTemplatesAsync_raises_a_friendly_error_on_failure()
+    {
+        IDotnetRunner runner = Substitute.For<IDotnetRunner>();
+        runner.RunAsync(
+                Arg.Any<IEnumerable<string>>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<Action<string>?>(),
+                Arg.Any<Action<string>?>())
+            .Returns(new DotnetResult
+            {
+                ExitCode = 1,
+                StdOut = string.Empty,
+                StdErr = "error: dotnet new list failed hard.",
+                CommandLine = "dotnet new list",
+                DryRun = false,
+            });
+        var catalog = new TemplateCatalog(runner, ttl: TimeSpan.FromHours(1));
+
+        Func<Task> act = () => catalog.GetTemplatesAsync(CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*dotnet new list failed hard.");
+    }
+
+    [Fact]
+    public async Task GetTemplatesAsync_does_not_cache_failures()
+    {
+        IDotnetRunner runner = Substitute.For<IDotnetRunner>();
+        runner.RunAsync(
+                Arg.Any<IEnumerable<string>>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<Action<string>?>(),
+                Arg.Any<Action<string>?>())
+            .Returns(new DotnetResult
+            {
+                ExitCode = 1,
+                StdOut = string.Empty,
+                StdErr = "error: transient failure.",
+                CommandLine = "dotnet new list",
+                DryRun = false,
+            });
+        var catalog = new TemplateCatalog(runner, ttl: TimeSpan.FromHours(1));
+
+        Func<Task> act = () => catalog.GetTemplatesAsync(CancellationToken.None);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        await runner.Received(2).RunAsync(
+            Arg.Any<IEnumerable<string>>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>(),
+            Arg.Any<Action<string>?>(),
+            Arg.Any<Action<string>?>());
+    }
+
     private static IDotnetRunner StubRunner(string stdout)
     {
         IDotnetRunner runner = Substitute.For<IDotnetRunner>();

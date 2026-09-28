@@ -34,23 +34,16 @@ public sealed class RootWizardCommand : AsyncCommand<RootWizardSettings>
         RootWizardSettings settings,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            var wizard = new RootWizard(
-                AnsiConsole.Console,
-                keyReader: null,
-                executor: (item, ct) => WizardDispatcher.RunAsync(item, settings, ct),
-                showHelp: HelpFallback,
-                inputRedirected: null,
-                version: null);
+        var wizard = new RootWizard(
+            AnsiConsole.Console,
+            keyReader: null,
+            executor: (item, ct) => WizardDispatcher.RunAsync(item, settings, ct),
+            showHelp: HelpFallback,
+            inputRedirected: null,
+            version: null);
 
-            return await wizard.RunAsync(settings.Query, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            AnsiConsole.WriteLine("Cancelled.");
-            return 130;
-        }
+        // Cancellations and flow errors reach the global handler (CommandErrors).
+        return await wizard.RunAsync(settings.Query, cancellationToken).ConfigureAwait(false);
     }
 }
 
