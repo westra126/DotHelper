@@ -85,9 +85,12 @@ public sealed class RootWizard
     }
 
     /// <summary>
-    /// Runs the wizard: header, action picker, optional sub-menu picker, then the action flow.
-    /// Esc at any menu prints <c>Cancelled.</c> and exits 0; Ctrl+C surfaces as
-    /// <see cref="OperationCanceledException"/> (exit 130 at the command layer).
+    /// Runs the wizard: action picker (with the banner header inside its frame), optional
+    /// sub-menu picker, then the action flow — all inside ONE fullscreen session
+    /// (<see cref="ScreenSession"/>), so the menu never flashes the terminal history and the
+    /// result messages land on the restored primary screen. Esc at any menu prints
+    /// <c>Cancelled.</c> and exits 0; Ctrl+C surfaces as <see cref="OperationCanceledException"/>
+    /// (exit 130 at the command layer).
     /// </summary>
     public async Task<int> RunAsync(string? query, CancellationToken cancellationToken)
     {
@@ -97,12 +100,17 @@ public sealed class RootWizard
             return _showHelp();
         }
 
-        RenderHeader(_console, _version);
+        return await ScreenSession
+            .RunAsync(_console, () => RunInteractiveAsync(query, cancellationToken))
+            .ConfigureAwait(false);
+    }
 
+    private async Task<int> RunInteractiveAsync(string? query, CancellationToken cancellationToken)
+    {
         WizardItem? action = Pick(WizardMenu.Root, "action", query);
         if (action is null)
         {
-            _console.WriteLine("Cancelled.");
+            OutputChannel.WriteLine(_console, "Cancelled.");
             return 0;
         }
 
@@ -111,7 +119,7 @@ public sealed class RootWizard
             action = Pick(action.Children, action.Title, query: null);
             if (action is null)
             {
-                _console.WriteLine("Cancelled.");
+                OutputChannel.WriteLine(_console, "Cancelled.");
                 return 0;
             }
         }
@@ -120,18 +128,29 @@ public sealed class RootWizard
     }
 
     /// <summary>
-    /// Header with the product title, version and key hints (PLAN.md §5.3). Separated from the
-    /// menu so tests can snapshot this stable block on its own.
+    /// Header lines of the wizard banner (PLAN.md §5.3): product title, version and key hints.
+    /// Rendered inside the picker frame (<see cref="FuzzyPickerOptions{T}.Header"/>) while the
+    /// fullscreen session is open; <see cref="RenderHeader"/> prints the same lines directly.
+    /// </summary>
+    internal static IReadOnlyList<string> HeaderLines(string version) =>
+    [
+        $"[{Theme.AccentMarkup}]DotHelper[/] [{Theme.MutedMarkup}]{Markup.Escape(version)}[/] " +
+            $"[{Theme.MutedMarkup}]— asistente para .NET[/]",
+        $"[{Theme.MutedMarkup}]↑/↓ mover · Enter seleccionar · Esc cancelar · Tab detalle · escribir para filtrar[/]",
+    ];
+
+    /// <summary>
+    /// Prints the banner lines directly (kept as the canonical, byte-stable rendering of
+    /// <see cref="HeaderLines"/> — the interactive path embeds them in the picker instead).
     /// </summary>
     internal static void RenderHeader(IAnsiConsole console, string version)
     {
         ArgumentNullException.ThrowIfNull(console);
 
-        console.MarkupLine(
-            $"[{Theme.AccentMarkup}]DotHelper[/] [{Theme.MutedMarkup}]{Markup.Escape(version)}[/] " +
-            $"[{Theme.MutedMarkup}]— asistente para .NET[/]");
-        console.MarkupLine(
-            $"[{Theme.MutedMarkup}]↑/↓ mover · Enter seleccionar · Esc cancelar · Tab detalle · escribir para filtrar[/]");
+        foreach (string line in HeaderLines(version))
+        {
+            console.MarkupLine(line);
+        }
     }
 
     private WizardItem? Pick(IReadOnlyList<WizardItem> items, string title, string? query)
@@ -145,6 +164,7 @@ public sealed class RootWizard
                 Fields = WizardMenu.Fields,
                 DetailLines = WizardMenu.Detail,
                 Title = title,
+                Header = HeaderLines(_version),
                 InitialQuery = query,
                 KeyReader = _keyReader,
             });
@@ -154,7 +174,9 @@ public sealed class RootWizard
 
     private static int DefaultShowHelp()
     {
-        AnsiConsole.WriteLine("DotHelper — interactive .NET helper. Run 'dh --help' for the command list.");
+        OutputChannel.WriteLine(
+            AnsiConsole.Console,
+            "DotHelper — interactive .NET helper. Run 'dh --help' for the command list.");
         return 0;
     }
 }

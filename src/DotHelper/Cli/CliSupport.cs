@@ -183,14 +183,17 @@ public static class CliSupport
             : Prompts.AskName(console, promptText, defaultValue.Length > 0 ? defaultValue : null);
     }
 
+    // Result messages go through OutputChannel: while a ScreenSession owns the alternate
+    // screen they are deferred and flushed on the restored primary screen (user reports 1–3).
+
     public static void PrintSuccess(string message) =>
-        AnsiConsole.MarkupLine($"[green]✔[/] {Markup.Escape(message)}");
+        OutputChannel.MarkupLine(AnsiConsole.Console, $"[green]✔[/] {Markup.Escape(message)}");
 
     public static void PrintCommand(DotnetResult result) =>
-        AnsiConsole.MarkupLine($"  [grey]({Markup.Escape(result.CommandLine)})[/]");
+        OutputChannel.MarkupLine(AnsiConsole.Console, $"  [grey]({Markup.Escape(result.CommandLine)})[/]");
 
     public static void PrintError(string message) =>
-        AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(message)}");
+        OutputChannel.MarkupLine(AnsiConsole.Console, $"[red]Error:[/] {Markup.Escape(message)}");
 
     /// <summary>
     /// Outcome line of a mutating command (pure): in dry-run the message must be unmistakable
@@ -214,7 +217,8 @@ public static class CliSupport
         string message = FormatOutcome(result, successMessage, wouldMessage);
         if (result.DryRun)
         {
-            AnsiConsole.MarkupLine($"[{Theme.MutedMarkup}]○[/] [grey]{Markup.Escape(message)}[/]");
+            OutputChannel.MarkupLine(
+                AnsiConsole.Console, $"[{Theme.MutedMarkup}]○[/] [grey]{Markup.Escape(message)}[/]");
         }
         else
         {
@@ -311,17 +315,20 @@ public static class CliSupport
         switch (result.Status)
         {
             case ClipboardStatus.Copied:
-                AnsiConsole.MarkupLine(
+                OutputChannel.MarkupLine(
+                    AnsiConsole.Console,
                     $"[{Theme.MutedMarkup}]Clipboard:[/] copied {commandLines.Length} command(s) via {Markup.Escape(result.Tool ?? "?")}");
                 break;
 
             case ClipboardStatus.NoTool when settings.Verbose:
-                AnsiConsole.MarkupLine(
+                OutputChannel.MarkupLine(
+                    AnsiConsole.Console,
                     $"[{Theme.MutedMarkup}]Clipboard:[/] no tool found ({string.Join("/", Clipboard.CandidateTools)}); nothing copied.");
                 break;
 
             case ClipboardStatus.Failed when settings.Verbose:
-                AnsiConsole.MarkupLine(
+                OutputChannel.MarkupLine(
+                    AnsiConsole.Console,
                     $"[{Theme.MutedMarkup}]Clipboard:[/] {Markup.Escape(result.Tool ?? "?")} failed " +
                     $"({Markup.Escape(result.Error ?? "unknown")}); nothing copied.");
                 break;

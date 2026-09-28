@@ -69,9 +69,21 @@ public sealed class NewProjectCommand : AsyncCommand<NewProjectSettings>
 /// <summary>Flow shared by <c>dh new project</c> and the "add first project" chain of <c>dh new solution</c>.</summary>
 public static class NewSolutionFlow
 {
-    public static async Task<int> RunAsync(NewSolutionSettings settings, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the flow inside one fullscreen session (user reports 1–3): the name prompt, the
+    /// chained confirmation and the dispatched project flow share a single alternate screen.
+    /// </summary>
+    public static Task<int> RunAsync(NewSolutionSettings settings, CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        NewSolutionSettings settings,
+        CancellationToken cancellationToken)
+    {
         string name = CliSupport.RequireValue(console, settings.Name, "Solution name:", "App", settings.Yes);
         if (CliSupport.RejectFlagLike(name, "Solution name"))
         {
@@ -132,9 +144,21 @@ public static class NewSolutionFlow
 /// <summary>Flow for <c>dh new project</c>.</summary>
 public static class NewProjectFlow
 {
-    public static async Task<int> RunAsync(NewProjectSettings settings, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the flow inside one fullscreen session (user reports 1–3): template picker and the
+    /// Name/Folder prompts share a single alternate screen; results land on the restored screen.
+    /// </summary>
+    public static Task<int> RunAsync(NewProjectSettings settings, CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        NewProjectSettings settings,
+        CancellationToken cancellationToken)
+    {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
 

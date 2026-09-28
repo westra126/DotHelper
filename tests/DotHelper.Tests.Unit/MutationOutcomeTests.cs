@@ -12,8 +12,11 @@ namespace DotHelper.Tests.Unit;
 /// M1 review: mutating flows must report <c>dotnet</c> failures as exit 1 with a friendly
 /// <c>Error:</c> line — never a green "✔ Created" with exit 0. The decision logic lives in
 /// <see cref="CliSupport.IsFailed"/> / <see cref="CliSupport.FinishMutation"/>; output is
-/// captured by swapping <see cref="AnsiConsole.Console"/> for a <see cref="TestConsole"/>.
+/// captured by swapping <see cref="AnsiConsole.Console"/> for a <see cref="TestConsole"/>. The
+/// messages go through the <c>ScreenSession</c> output channel, so this class joins the
+/// serializing collection.
 /// </summary>
+[Collection("ScreenSession")]
 public sealed class MutationOutcomeTests
 {
     [Fact]

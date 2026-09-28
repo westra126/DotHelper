@@ -1,5 +1,6 @@
 using DotHelper.Core.Dotnet;
 using DotHelper.Core.Workspace;
+using DotHelper.Ui;
 
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -52,6 +53,16 @@ public sealed class SlnAddCommand : AsyncCommand<SlnAddSettings>
         CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return await ScreenSession
+            .RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken))
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        SlnAddSettings settings,
+        CancellationToken cancellationToken)
+    {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
 
@@ -125,6 +136,16 @@ public sealed class SlnRemoveCommand : AsyncCommand<SlnRemoveSettings>
         CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return await ScreenSession
+            .RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken))
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        SlnRemoveSettings settings,
+        CancellationToken cancellationToken)
+    {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
 

@@ -41,7 +41,16 @@ public static class ListTemplatesFlow
         WriteIndented = false,
     };
 
-    public static async Task<int> RunAsync(ListTemplatesSettings settings, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the flow inside one fullscreen session when it interacts (the picker): the selected
+    /// template detail and every message land on the restored primary screen.
+    /// </summary>
+    public static Task<int> RunAsync(ListTemplatesSettings settings, CancellationToken cancellationToken)
+    {
+        return ScreenSession.RunAsync(AnsiConsole.Console, () => RunCoreAsync(settings, cancellationToken));
+    }
+
+    private static async Task<int> RunCoreAsync(ListTemplatesSettings settings, CancellationToken cancellationToken)
     {
         var runner = new DotnetRunner(new DotnetRunnerOptions { DryRun = settings.DryRun });
 
@@ -50,7 +59,7 @@ public static class ListTemplatesFlow
             DotnetResult preview = await runner
                 .RunAsync(TemplateCatalog.ListArgs, workingDir: null, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            AnsiConsole.WriteLine(preview.CommandLine);
+            OutputChannel.WriteLine(AnsiConsole.Console, preview.CommandLine);
             return 0;
         }
 
@@ -59,6 +68,7 @@ public static class ListTemplatesFlow
 
         if (settings.Json)
         {
+            // Raw JSON contract: never routed through the deferred channel, byte-identical.
             Console.WriteLine(JsonSerializer.Serialize(templates, JsonOptions));
             return 0;
         }
@@ -92,7 +102,7 @@ public static class ListTemplatesFlow
         TemplateInfo? selected = picker.Pick(cancellationToken);
         if (selected is null)
         {
-            AnsiConsole.WriteLine("Cancelled.");
+            OutputChannel.WriteLine(AnsiConsole.Console, "Cancelled.");
             return 1;
         }
 
@@ -117,7 +127,7 @@ public static class ListTemplatesFlow
                 Markup.Escape(string.Join(", ", template.Languages)));
         }
 
-        AnsiConsole.Write(table);
+        OutputChannel.WriteRenderable(AnsiConsole.Console, table);
     }
 
     private static void RenderRankedTable(IReadOnlyList<ScoredItem<TemplateInfo>> ranked, string query)
@@ -146,9 +156,11 @@ public static class ListTemplatesFlow
             count++;
         }
 
-        AnsiConsole.MarkupLine($"[{Theme.MutedMarkup}]query:[/] {Markup.Escape(query)}  " +
+        OutputChannel.MarkupLine(
+            AnsiConsole.Console,
+            $"[{Theme.MutedMarkup}]query:[/] {Markup.Escape(query)}  " +
             $"[{Theme.MutedMarkup}]{ranked.Count} match(es), showing {count}[/]");
-        AnsiConsole.Write(table);
+        OutputChannel.WriteRenderable(AnsiConsole.Console, table);
     }
 
     private static void RenderDetail(TemplateInfo template)
@@ -161,7 +173,9 @@ public static class ListTemplatesFlow
         grid.AddRow("Author", Markup.Escape(template.Author));
         grid.AddRow("Tags", Markup.Escape(string.Join(", ", template.Tags)));
 
-        AnsiConsole.Write(new Panel(grid).Header("Selected template").BorderColor(Theme.Accent));
+        OutputChannel.WriteRenderable(
+            AnsiConsole.Console,
+            new Panel(grid).Header("Selected template").BorderColor(Theme.Accent));
     }
 }
 

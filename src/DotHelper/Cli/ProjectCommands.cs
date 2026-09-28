@@ -91,14 +91,14 @@ public static class ProjectListFlow
                 table.AddRow(Markup.Escape(project), Markup.Escape(slnName));
             }
 
-            AnsiConsole.Write(table);
+            OutputChannel.WriteRenderable(AnsiConsole.Console, table);
             return 0;
         }
 
         if (workspace.ClosestProjectPath is not null)
         {
-            AnsiConsole.MarkupLine($"[{Theme.MutedMarkup}]No solution — closest project:[/]");
-            AnsiConsole.MarkupLine(Markup.Escape(workspace.ClosestProjectPath));
+            OutputChannel.MarkupLine(AnsiConsole.Console, $"[{Theme.MutedMarkup}]No solution — closest project:[/]");
+            OutputChannel.MarkupLine(AnsiConsole.Console, Markup.Escape(workspace.ClosestProjectPath));
             return 0;
         }
 
@@ -110,12 +110,22 @@ public static class ProjectListFlow
 /// <summary>Shared add-ref / remove-ref flow with double picker (PLAN.md §5.2).</summary>
 public static class ProjectRefFlow
 {
-    public static async Task<int> RunAsync(
+    /// <summary>Runs the flow inside one fullscreen session (the side pickers interact).</summary>
+    public static Task<int> RunAsync(
         ProjectAddRefSettings settings,
         bool remove,
         CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, remove, cancellationToken));
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        ProjectAddRefSettings settings,
+        bool remove,
+        CancellationToken cancellationToken)
+    {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
 

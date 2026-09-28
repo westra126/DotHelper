@@ -31,6 +31,12 @@ public sealed class FuzzyPickerOptions<T>
     public string? InitialQuery { get; init; }
 
     /// <summary>
+    /// Optional header lines (Spectre markup, trusted) rendered above the input line — e.g. the
+    /// root wizard banner, so it stays visible while the picker owns the fullscreen session.
+    /// </summary>
+    public IReadOnlyList<string>? Header { get; init; }
+
+    /// <summary>
     /// Optional key source (Fase 5 testability). When <c>null</c> the picker reads the real
     /// console via <see cref="ConsoleKeyReader"/> exactly as before; when set, the picker is
     /// driven by that reader and the <see cref="Console.IsInputRedirected"/> fallback is skipped.
@@ -109,26 +115,14 @@ public sealed class FuzzyPicker<T>
 
         try
         {
-            // Alternate screen (Spectre.Console 0.55 extension
-            // `AnsiConsoleExtensions.AlternateScreen(IAnsiConsole, Action)`): the picker owns the
-            // whole window while it is open and the previous screen — with the flow messages
-            // printed afterwards — is restored when the action returns or throws (Spectre emits
-            // the exit sequence in a finally; verified in the Spectre source). Only for the real
-            // console: an injected key reader (tests) must not touch the terminal buffer. And only
-            // when the terminal supports it: Spectre throws NotSupportedException otherwise
-            // (also verified in the source), so capability-less terminals degrade to the primary
-            // screen instead of crashing.
-            if (ShouldUseAlternateScreen(
-                    hasInjectedKeyReader: injected is not null,
-                    ansi: _console.Profile.Capabilities.Ansi,
-                    alternateBuffer: _console.Profile.Capabilities.AlternateBuffer))
-            {
-                _console.AlternateScreen(() => RunLoop());
-            }
-            else
-            {
-                RunLoop();
-            }
+            // Fullscreen session (user reports 1–3): the wizard/command wraps the whole
+            // interactive phase in one ScreenSession; the picker only ensures the alternate
+            // screen is open before the first frame. Nested pickers/prompts are no-ops and the
+            // session restores the primary screen when the outermost scope ends. With an
+            // injected key reader (tests) or a capability-less terminal (pipes, TestConsole)
+            // nothing is entered — no escape sequences at all.
+            ScreenSession.EnsureOpen(_console, injected is not null);
+            RunLoop();
         }
         finally
         {
@@ -236,15 +230,6 @@ public sealed class FuzzyPicker<T>
         FuzzyScorer.Rank(query, _items, _options.Fields, _options.Cutoff, _options.Tiebreak);
 
     /// <summary>
-    /// Pure: the alternate screen is only entered when the real console drives the loop (no
-    /// injected key reader) AND the terminal actually supports alternate buffers — Spectre's
-    /// <c>AlternateScreen</c> throws <see cref="NotSupportedException"/> when either ANSI or the
-    /// alternate buffer is missing, so those terminals keep the previous primary-screen behavior.
-    /// </summary>
-    internal static bool ShouldUseAlternateScreen(bool hasInjectedKeyReader, bool ansi, bool alternateBuffer) =>
-        !hasInjectedKeyReader && ansi && alternateBuffer;
-
-    /// <summary>
     /// Window layout for one frame (Fase: full-height picker). With an injected key reader the
     /// configured <c>PageSize</c> is kept for deterministic tests; with the real console the page
     /// size is derived from the console height so the picker fills the window, shrinking the list
@@ -260,7 +245,13 @@ public sealed class FuzzyPicker<T>
 
         return injected is not null
             ? new PickerLayout(_options.PageSize, detailLines)
-            : ComputeLayout(_console.Profile.Height, _options.PageSize, showDetail, detailLines, ranked.Count);
+            : ComputeLayout(
+                _console.Profile.Height,
+                _options.PageSize,
+                showDetail,
+                detailLines,
+                ranked.Count,
+                _options.Header?.Count ?? 0);
     }
 
     private static T? Current(IReadOnlyList<ScoredItem<T>> ranked, int selectedIndex) =>
@@ -268,25 +259,27 @@ public sealed class FuzzyPicker<T>
 
     /// <summary>
     /// Pure: sizes the list window so the whole view fits the console. Lines used besides the
-    /// list: title+query (1), hints (1) and one spare line at the bottom (Live borders); the
-    /// detail block (rule + lines) and the <c>n/total</c> counter appear only when present.
-    /// When the detail block would push the list out of the window, detail lines are dropped
-    /// first so at least one list row and the hints/counter stay visible.
+    /// list: title+query (1), hints (1), one spare line at the bottom (Live borders) and the
+    /// optional header lines; the detail block (rule + lines) and the <c>n/total</c> counter
+    /// appear only when present. When the detail block would push the list out of the window,
+    /// detail lines are dropped first so at least one list row and the hints/counter stay visible.
     /// </summary>
     /// <param name="consoleHeight">Console height; ≤ 0 means unknown → keep the configured size.</param>
+    /// <param name="headerLineCount">Header lines rendered above the input line (see <see cref="FuzzyPickerOptions{T}.Header"/>).</param>
     internal static PickerLayout ComputeLayout(
         int consoleHeight,
         int configuredPageSize,
         bool showDetail,
         int detailLineCount,
-        int itemCount)
+        int itemCount,
+        int headerLineCount = 0)
     {
         if (consoleHeight <= 0)
         {
             return new PickerLayout(configuredPageSize, showDetail ? Math.Max(0, detailLineCount) : 0);
         }
 
-        const int fixedLines = 3; // title+query, hints, spare line at the bottom
+        int fixedLines = 3 + Math.Max(0, headerLineCount); // title+query, hints, spare line at the bottom
         int wantedDetail = showDetail ? Math.Max(0, detailLineCount) : 0;
         int detailBlock = showDetail ? 1 : 0; // the "detail" rule
 
@@ -356,6 +349,16 @@ public sealed class FuzzyPicker<T>
         PickerLayout layout)
     {
         List<IRenderable> elements = [];
+
+        // Header (user report 1): the wizard banner lives inside the picker frame, so it is
+        // visible while the alternate screen is open — never on the hidden primary screen.
+        if (_options.Header is { Count: > 0 })
+        {
+            foreach (string line in _options.Header)
+            {
+                elements.Add(new Markup(line));
+            }
+        }
 
         string title = _options.Title ?? "select";
         elements.Add(new Markup(

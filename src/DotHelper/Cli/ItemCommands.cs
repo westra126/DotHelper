@@ -82,9 +82,22 @@ public sealed class ClassCommand : AsyncCommand<ItemCommandSettings>
 /// <summary>Shared item-creation flow (PLAN.md §5.3).</summary>
 public static class ItemFlow
 {
-    public static async Task<int> RunAsync(ItemCommandSettings settings, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the flow inside one fullscreen session (user reports 1–3): the template picker, the
+    /// Name/Folder prompts and the project picker all live in the same alternate screen, and the
+    /// result messages are flushed on the restored primary screen.
+    /// </summary>
+    public static Task<int> RunAsync(ItemCommandSettings settings, CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        ItemCommandSettings settings,
+        CancellationToken cancellationToken)
+    {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
 

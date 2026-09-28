@@ -151,19 +151,29 @@ public sealed class FuzzyPickerTests
         console.Output.Should().NotContain("\u001b[?1049l");
     }
 
-    [Theory]
-    [InlineData(false, true, true, true, "real console on a capable terminal uses the alternate screen")]
-    [InlineData(true, true, true, false, "an injected key reader never touches the terminal buffer")]
-    [InlineData(false, false, true, false, "a terminal without ANSI degrades to the primary screen")]
-    [InlineData(false, true, false, false, "a terminal without alternate buffers degrades instead of throwing")]
-    [InlineData(false, false, false, false, "no capabilities at all degrades")]
-    public void Alternate_screen_requires_a_real_console_and_terminal_support(
-        bool hasInjectedKeyReader, bool ansi, bool alternateBuffer, bool expected, string because)
+    [Fact]
+    public void Header_lines_render_inside_the_picker_frame()
     {
-        // Spectre's AlternateScreen throws NotSupportedException on capability-less terminals;
-        // the picker must fall back to the primary screen (RunLoop) in that case.
-        FuzzyPicker<string>.ShouldUseAlternateScreen(hasInjectedKeyReader, ansi, alternateBuffer)
-            .Should().Be(expected, because);
+        // User report 1: the wizard banner must live inside the picker view (visible while the
+        // alternate screen is open), not on the primary screen the session hides.
+        var console = new TestConsole();
+        var picker = new FuzzyPicker<string>(
+            console,
+            ["Alpha"],
+            new FuzzyPickerOptions<string>
+            {
+                PrimaryText = static s => s,
+                Fields = static s => [new WeightedField(s, WeightedField.NameWeight)],
+                Title = "demo",
+                Header = ["[bold cyan]DotHelper[/] [grey]1.2.3[/]", "[grey]hint line[/]"],
+                KeyReader = ScriptedKeyReader.From(ConsoleKey.Escape),
+            });
+
+        picker.Pick(TestContext.Current.CancellationToken);
+
+        console.Output.Should().Contain("DotHelper");
+        console.Output.Should().Contain("1.2.3");
+        console.Output.Should().Contain("hint line", "the header renders as the first lines of the frame");
     }
 
     [Fact]

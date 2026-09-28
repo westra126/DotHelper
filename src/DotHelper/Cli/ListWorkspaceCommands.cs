@@ -1,4 +1,5 @@
 using DotHelper.Core.Workspace;
+using DotHelper.Ui;
 
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -38,7 +39,7 @@ public static class ListSolutionsFlow
             table.AddRow(Markup.Escape(solution));
         }
 
-        AnsiConsole.Write(table);
+        OutputChannel.WriteRenderable(AnsiConsole.Console, table);
         return 0;
     }
 }

@@ -265,7 +265,7 @@ public static class NugetSearchFlow
                     workingDir: null,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            AnsiConsole.WriteLine(preview.CommandLine);
+            OutputChannel.WriteLine(AnsiConsole.Console, preview.CommandLine);
             return 0;
         }
 
@@ -276,6 +276,7 @@ public static class NugetSearchFlow
 
         if (settings.Json)
         {
+            // Raw JSON contract: never routed through the deferred channel, byte-identical.
             Console.WriteLine(NugetFlow.ToJson(packages));
             return 0;
         }
@@ -296,7 +297,7 @@ public static class NugetSearchFlow
                 Markup.Escape(NugetFlow.Truncate(package.Description)));
         }
 
-        AnsiConsole.Write(table);
+        OutputChannel.WriteRenderable(AnsiConsole.Console, table);
         return 0;
     }
 }
@@ -304,9 +305,21 @@ public static class NugetSearchFlow
 /// <summary>Flow for <c>dh nuget add</c> (PLAN.md §5.3 transparency output).</summary>
 public static class NugetAddFlow
 {
-    public static async Task<int> RunAsync(NugetAddSettings settings, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the flow inside one fullscreen session (user reports 1–3): project picker, search
+    /// prompt, package picker and version prompt share a single alternate screen.
+    /// </summary>
+    public static Task<int> RunAsync(NugetAddSettings settings, CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        NugetAddSettings settings,
+        CancellationToken cancellationToken)
+    {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
         var searchService = new NugetService(discovery);
@@ -448,9 +461,18 @@ public static class NugetAddFlow
 /// <summary>Flow for <c>dh nuget list</c>.</summary>
 public static class NugetListFlow
 {
-    public static async Task<int> RunAsync(NugetListSettings settings, CancellationToken cancellationToken)
+    /// <summary>Runs the flow inside one fullscreen session (the project picker may interact).</summary>
+    public static Task<int> RunAsync(NugetListSettings settings, CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        NugetListSettings settings,
+        CancellationToken cancellationToken)
+    {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
 
         WorkspaceContext workspace = await CliSupport
@@ -475,7 +497,7 @@ public static class NugetListFlow
                     workingDir: null,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
-            AnsiConsole.WriteLine(preview.CommandLine);
+            OutputChannel.WriteLine(AnsiConsole.Console, preview.CommandLine);
             return 0;
         }
 
@@ -486,6 +508,7 @@ public static class NugetListFlow
 
         if (settings.Json)
         {
+            // Raw JSON contract: never routed through the deferred channel, byte-identical.
             Console.WriteLine(NugetFlow.ToJson(packages));
             return 0;
         }
@@ -504,7 +527,7 @@ public static class NugetListFlow
                 package.IsTransitive ? "transitive" : "top-level");
         }
 
-        AnsiConsole.Write(table);
+        OutputChannel.WriteRenderable(AnsiConsole.Console, table);
         return 0;
     }
 }
@@ -512,9 +535,18 @@ public static class NugetListFlow
 /// <summary>Flow for <c>dh nuget remove</c>.</summary>
 public static class NugetRemoveFlow
 {
-    public static async Task<int> RunAsync(NugetRemoveSettings settings, CancellationToken cancellationToken)
+    /// <summary>Runs the flow inside one fullscreen session (the pickers interact).</summary>
+    public static Task<int> RunAsync(NugetRemoveSettings settings, CancellationToken cancellationToken)
     {
         IAnsiConsole console = AnsiConsole.Console;
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+    }
+
+    private static async Task<int> RunCoreAsync(
+        IAnsiConsole console,
+        NugetRemoveSettings settings,
+        CancellationToken cancellationToken)
+    {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
 

@@ -60,6 +60,17 @@ public sealed class PickerLayoutTests
     }
 
     [Fact]
+    public void Header_lines_steal_rows_from_the_list()
+    {
+        // height 24, 2 header lines: 3 fixed + 2 header + 1 counter => 18 rows.
+        PickerLayout layout = FuzzyPicker<string>.ComputeLayout(
+            24, 12, showDetail: false, 0, itemCount: 50, headerLineCount: 2);
+
+        layout.PageSize.Should().Be(18);
+        layout.DetailLineLimit.Should().Be(0);
+    }
+
+    [Fact]
     public void Absurdly_small_window_falls_back_to_one_row()
     {
         PickerLayout layout = FuzzyPicker<string>.ComputeLayout(3, 12, showDetail: true, 6, itemCount: 50);

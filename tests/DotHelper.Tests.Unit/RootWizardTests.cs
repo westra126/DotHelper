@@ -14,8 +14,10 @@ namespace DotHelper.Tests.Unit;
 /// TTY is required. Rendering strategy: the picker goes through <c>Spectre.Console.Live</c>, which
 /// on <see cref="TestConsole"/> accumulates one text block per frame (verified empirically), so
 /// picker output is asserted with contains-checks; only flat zones (the header) get a byte-exact
-/// snapshot.
+/// snapshot. The wizard drives the process-static <see cref="ScreenSession"/>, so this class joins
+/// the serializing collection.
 /// </summary>
+[Collection("ScreenSession")]
 public sealed class RootWizardTests
 {
     [Fact]
@@ -46,6 +48,19 @@ public sealed class RootWizardTests
 
         h.Console.Output.Should().Contain("Enter select", "the picker prints the key hints");
         h.Console.Output.Should().Contain("Cancelled.");
+    }
+
+    [Fact]
+    public async Task The_banner_lives_inside_the_menu_frame()
+    {
+        // User report 1: the header must render with the picker (inside the fullscreen session),
+        // never on the primary screen the session hides while the menu is open.
+        Harness h = NewHarness(ScriptedKeyReader.From(ConsoleKey.Escape));
+
+        await h.RunAsync();
+
+        h.Console.Output.Should().Contain("DotHelper 0.0.0-test");
+        h.Console.Output.Should().Contain("asistente para .NET", "the wizard banner is the picker header");
     }
 
     [Fact]
