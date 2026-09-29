@@ -43,14 +43,23 @@ public static class ListTemplatesFlow
 
     /// <summary>
     /// Runs the flow inside one fullscreen session when it interacts (the picker): the selected
-    /// template detail and every message land on the restored primary screen.
+    /// template detail and every message land on the restored primary screen. The picker is the
+    /// flow's only interactive step: Esc exits the flow (back to the wizard menu when dispatched
+    /// from there, <c>Cancelled.</c> + exit 1 for the direct command).
     /// </summary>
-    public static Task<int> RunAsync(ListTemplatesSettings settings, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(
+        ListTemplatesSettings settings,
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc = EscHint.Cancel)
     {
-        return ScreenSession.RunAsync(AnsiConsole.Console, () => RunCoreAsync(settings, cancellationToken));
+        return ScreenSession.RunAsync(
+            AnsiConsole.Console, () => RunCoreAsync(settings, cancellationToken, firstStepEsc));
     }
 
-    private static async Task<int> RunCoreAsync(ListTemplatesSettings settings, CancellationToken cancellationToken)
+    private static async Task<int> RunCoreAsync(
+        ListTemplatesSettings settings,
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc)
     {
         var runner = new DotnetRunner(new DotnetRunnerOptions { DryRun = settings.DryRun });
 
@@ -93,13 +102,30 @@ public static class ListTemplatesFlow
             return 0;
         }
 
-        var picker = new FuzzyPicker<TemplateInfo>(
-            AnsiConsole.Console,
-            templates,
-            TemplateSearch.PickerOptions());
+        FlowNavigator nav = new(firstStepEsc);
+        TemplateInfo? selected;
+        while (true)
+        {
+            try
+            {
+                var picker = new FuzzyPicker<TemplateInfo>(
+                    AnsiConsole.Console,
+                    templates,
+                    TemplateSearch.PickerOptions(escHint: nav.Ask()));
 
-        // Cancellations reach the global handler (CommandErrors).
-        TemplateInfo? selected = picker.Pick(cancellationToken);
+                // Cancellations reach the global handler (CommandErrors).
+                selected = picker.Pick(cancellationToken);
+                break;
+            }
+            catch (PromptCancelledException)
+            {
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
+        }
+
         if (selected is null)
         {
             OutputChannel.WriteLine(AnsiConsole.Console, "Cancelled.");

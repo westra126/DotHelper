@@ -85,18 +85,25 @@ public static class ItemFlow
     /// <summary>
     /// Runs the flow inside one fullscreen session (user reports 1–3): the template picker, the
     /// Name/Folder prompts and the project picker all live in the same alternate screen, and the
-    /// result messages are flushed on the restored primary screen.
+    /// result messages are flushed on the restored primary screen. Esc rewinds step by step
+    /// (Folder → Project → Name → Template) keeping previous answers as defaults/preselections;
+    /// Esc at the first interactive step exits the flow (see <see cref="FlowNavigator"/> and
+    /// <paramref name="firstStepEsc"/>).
     /// </summary>
-    public static Task<int> RunAsync(ItemCommandSettings settings, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(
+        ItemCommandSettings settings,
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc = EscHint.Cancel)
     {
         IAnsiConsole console = AnsiConsole.Console;
-        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken, firstStepEsc));
     }
 
     private static async Task<int> RunCoreAsync(
         IAnsiConsole console,
         ItemCommandSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc)
     {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
@@ -107,45 +114,122 @@ public static class ItemFlow
             .Where(static t => t.Type.Equals("item", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        TemplateInfo? template = ResolveTemplate(console, itemTemplates, settings);
-        if (template is null)
+        // Answers kept across rewinds ("keep what was chosen"): re-asked steps offer them as
+        // defaults (prompts) / preselection (pickers).
+        TemplateInfo? template = null;
+        string? name = null;
+        WorkspaceContext? workspace = null;
+        string? projectFile = null;
+        string? outputSubdir = null;
+
+        FlowNavigator nav = new(firstStepEsc);
+        while (true)
         {
-            CliSupport.PrintError("No item template selected.");
-            return 1;
+            try
+            {
+                if (nav.Step > 3)
+                {
+                    break;
+                }
+
+                switch (nav.Step)
+                {
+                    case 0: // template
+                        if (!string.IsNullOrWhiteSpace(settings.Template))
+                        {
+                            // Provided on the command line: auto-resolved, never a step.
+                            template = FindTemplate(itemTemplates, settings.Template!);
+                        }
+                        else
+                        {
+                            template = CliSupport.ChooseTemplate(
+                                console, itemTemplates, settings.Query, settings.Yes, nav, template);
+                        }
+
+                        if (template is null)
+                        {
+                            CliSupport.PrintError("No item template selected.");
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 1: // name
+                        name = CliSupport.RequireValue(
+                            console, settings.Name, "Name:", name ?? "NewFile", settings.Yes, nav: nav);
+                        if (CliSupport.RejectFlagLike(name, "Name"))
+                        {
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 2: // project
+                        if (!string.IsNullOrWhiteSpace(settings.Project))
+                        {
+                            string full = Path.GetFullPath(settings.Project!);
+                            projectFile = File.Exists(full) ? full : null;
+                        }
+                        else
+                        {
+                            workspace ??= await CliSupport
+                                .ResolveWorkspaceAsync(discovery, cancellationToken)
+                                .ConfigureAwait(false);
+
+                            projectFile = workspace.SolutionProjectPaths.Count > 0
+                                ? CliSupport.ChooseProject(
+                                    console,
+                                    workspace.SolutionProjectPaths,
+                                    "project",
+                                    settings.Query,
+                                    settings.Yes,
+                                    nav,
+                                    projectFile)
+                                : workspace.ClosestProjectPath;
+                        }
+
+                        if (projectFile is null)
+                        {
+                            CliSupport.PrintError("No target project selected.");
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 3: // folder
+                        outputSubdir = CliSupport.RequireValue(
+                            console,
+                            settings.Output,
+                            "Folder (Enter = project root):",
+                            outputSubdir ?? string.Empty,
+                            settings.Yes,
+                            allowEmpty: true,
+                            nav);
+                        nav.Next();
+                        break;
+                }
+            }
+            catch (PromptCancelledException)
+            {
+                // Esc: rewind one visible step, or exit the flow at its first one.
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
         }
 
-        string templateShortName = template.ShortNames.FirstOrDefault() ?? template.Name;
-        string name = CliSupport.RequireValue(console, settings.Name, "Name:", "NewFile", settings.Yes);
-        if (CliSupport.RejectFlagLike(name, "Name"))
-        {
-            return 1;
-        }
-
-        WorkspaceContext workspace = await CliSupport
-            .ResolveWorkspaceAsync(discovery, cancellationToken)
-            .ConfigureAwait(false);
-
-        string? projectFile = ResolveProject(console, workspace, settings);
-        if (projectFile is null)
-        {
-            CliSupport.PrintError("No target project selected.");
-            return 1;
-        }
-
-        string projectDirectory = Path.GetDirectoryName(Path.GetFullPath(projectFile))
+        string templateShortName = template!.ShortNames.FirstOrDefault() ?? template.Name;
+        string projectDirectory = Path.GetDirectoryName(Path.GetFullPath(projectFile!))
             ?? Environment.CurrentDirectory;
-
-        string outputSubdir = CliSupport.RequireValue(
-            console,
-            settings.Output,
-            "Folder (Enter = project root):",
-            string.Empty,
-            settings.Yes,
-            allowEmpty: true);
+        string folder = outputSubdir ?? string.Empty;
 
         var itemService = new ItemService(mutating);
         DotnetResult result = await itemService
-            .CreateAsync(templateShortName, name, projectDirectory, outputSubdir, projectFile, cancellationToken)
+            .CreateAsync(templateShortName, name!, projectDirectory, folder, projectFile!, cancellationToken)
             .ConfigureAwait(false);
 
         if (CliSupport.IsFailed(result))
@@ -153,12 +237,12 @@ public static class ItemFlow
             return CliSupport.FailMutation(result);
         }
 
-        string targetDirectory = string.IsNullOrWhiteSpace(outputSubdir)
+        string targetDirectory = string.IsNullOrWhiteSpace(folder)
             ? projectDirectory
-            : Path.Combine(projectDirectory, outputSubdir);
+            : Path.Combine(projectDirectory, folder);
         string? createdPath = result.DryRun
-            ? Path.Combine(targetDirectory, name)
-            : CreatedFileResolver.FindByBaseName(targetDirectory, name);
+            ? Path.Combine(targetDirectory, name!)
+            : CreatedFileResolver.FindByBaseName(targetDirectory, name!);
         if (createdPath is null)
         {
             CliSupport.PrintError($"Could not find the created file for '{name}' under {targetDirectory}.");
@@ -168,40 +252,11 @@ public static class ItemFlow
         return CliSupport.FinishMutation(settings, result, $"Created {createdPath}", $"would create {createdPath}");
     }
 
-    private static TemplateInfo? ResolveTemplate(
-        IAnsiConsole console,
-        IReadOnlyList<TemplateInfo> itemTemplates,
-        ItemCommandSettings settings)
+    private static TemplateInfo? FindTemplate(IReadOnlyList<TemplateInfo> itemTemplates, string provided)
     {
-        if (!string.IsNullOrWhiteSpace(settings.Template))
-        {
-            TemplateInfo? byShortName = itemTemplates.FirstOrDefault(t =>
-                t.ShortNames.Contains(settings.Template!, StringComparer.OrdinalIgnoreCase));
-            return byShortName ?? itemTemplates.FirstOrDefault(t =>
-                t.Name.Equals(settings.Template!, StringComparison.OrdinalIgnoreCase));
-        }
-
-        return CliSupport.ChooseTemplate(console, itemTemplates, settings.Query, settings.Yes);
+        TemplateInfo? byShortName = itemTemplates.FirstOrDefault(t =>
+            t.ShortNames.Contains(provided, StringComparer.OrdinalIgnoreCase));
+        return byShortName ?? itemTemplates.FirstOrDefault(t =>
+            t.Name.Equals(provided, StringComparison.OrdinalIgnoreCase));
     }
-
-    private static string? ResolveProject(
-        IAnsiConsole console,
-        WorkspaceContext workspace,
-        ItemCommandSettings settings)
-    {
-        if (!string.IsNullOrWhiteSpace(settings.Project))
-        {
-            string full = Path.GetFullPath(settings.Project!);
-            return File.Exists(full) ? full : null;
-        }
-
-        if (workspace.SolutionProjectPaths.Count > 0)
-        {
-            return CliSupport.ChooseProject(
-                console, workspace.SolutionProjectPaths, "project", settings.Query, settings.Yes);
-        }
-
-        return workspace.ClosestProjectPath;
-    }
-
 }

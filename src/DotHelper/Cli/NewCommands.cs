@@ -72,22 +72,53 @@ public static class NewSolutionFlow
     /// <summary>
     /// Runs the flow inside one fullscreen session (user reports 1–3): the name prompt, the
     /// chained confirmation and the dispatched project flow share a single alternate screen.
+    /// Esc rewinds within the ask phase (the name step) keeping the previous answer as the
+    /// default; Esc at the first interactive step exits the flow (see <see cref="FlowNavigator"/>
+    /// and <paramref name="firstStepEsc"/>). The post-create confirmation is outside the step
+    /// machine on purpose: there is no "un-create", so Esc there cancels the remaining chain.
     /// </summary>
-    public static Task<int> RunAsync(NewSolutionSettings settings, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(
+        NewSolutionSettings settings,
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc = EscHint.Cancel)
     {
         IAnsiConsole console = AnsiConsole.Console;
-        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken, firstStepEsc));
     }
 
     private static async Task<int> RunCoreAsync(
         IAnsiConsole console,
         NewSolutionSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc)
     {
-        string name = CliSupport.RequireValue(console, settings.Name, "Solution name:", "App", settings.Yes);
-        if (CliSupport.RejectFlagLike(name, "Solution name"))
+        string? name = null;
+        FlowNavigator nav = new(firstStepEsc);
+        while (true)
         {
-            return 1;
+            try
+            {
+                if (nav.Step > 0)
+                {
+                    break;
+                }
+
+                name = CliSupport.RequireValue(
+                    console, settings.Name, "Solution name:", name ?? "App", settings.Yes, nav: nav);
+                if (CliSupport.RejectFlagLike(name, "Solution name"))
+                {
+                    return 1;
+                }
+
+                nav.Next();
+            }
+            catch (PromptCancelledException)
+            {
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
         }
 
         SlnFormat format = ParseFormat(settings.Format);
@@ -96,7 +127,7 @@ public static class NewSolutionFlow
         var solutionService = new SolutionService(runner);
 
         DotnetResult result = await solutionService
-            .CreateAsync(name, outputDir: null, format, cancellationToken)
+            .CreateAsync(name!, outputDir: null, format, cancellationToken)
             .ConfigureAwait(false);
 
         string solutionFile = $"{name}.{(format == SlnFormat.Slnx ? "slnx" : "sln")}";
@@ -121,7 +152,9 @@ public static class NewSolutionFlow
                 Verbose = settings.Verbose,
                 PrintCmd = settings.PrintCmd,
             };
-            return await NewProjectFlow.RunAsync(projectSettings, cancellationToken).ConfigureAwait(false);
+            return await NewProjectFlow
+                .RunAsync(projectSettings, cancellationToken, firstStepEsc)
+                .ConfigureAwait(false);
         }
 
         return 0;
@@ -147,17 +180,23 @@ public static class NewProjectFlow
     /// <summary>
     /// Runs the flow inside one fullscreen session (user reports 1–3): template picker and the
     /// Name/Folder prompts share a single alternate screen; results land on the restored screen.
+    /// Esc rewinds step by step (Folder → Name → Template) keeping previous answers; Esc at the
+    /// first interactive step exits the flow (see <paramref name="firstStepEsc"/>).
     /// </summary>
-    public static Task<int> RunAsync(NewProjectSettings settings, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(
+        NewProjectSettings settings,
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc = EscHint.Cancel)
     {
         IAnsiConsole console = AnsiConsole.Console;
-        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken, firstStepEsc));
     }
 
     private static async Task<int> RunCoreAsync(
         IAnsiConsole console,
         NewProjectSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc)
     {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
@@ -168,36 +207,91 @@ public static class NewProjectFlow
             .Where(static t => t.Type.Equals("project", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        TemplateInfo? template = ResolveTemplate(console, projectTemplates, settings, cancellationToken);
-        if (template is null)
+        // Answers kept across rewinds (see ItemFlow).
+        TemplateInfo? template = null;
+        string? name = null;
+        string? outputParent = null;
+        WorkspaceContext? workspace = null;
+
+        FlowNavigator nav = new(firstStepEsc);
+        while (true)
         {
-            CliSupport.PrintError("No project template selected.");
-            return 1;
+            try
+            {
+                if (nav.Step > 2)
+                {
+                    break;
+                }
+
+                switch (nav.Step)
+                {
+                    case 0: // template
+                        if (!string.IsNullOrWhiteSpace(settings.Template))
+                        {
+                            template = FindTemplate(projectTemplates, settings.Template!);
+                        }
+                        else
+                        {
+                            template = CliSupport.ChooseTemplate(
+                                console, projectTemplates, settings.Query, settings.Yes, nav, template);
+                        }
+
+                        if (template is null)
+                        {
+                            CliSupport.PrintError("No project template selected.");
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 1: // name
+                        name = CliSupport.RequireValue(
+                            console, settings.Name, "Project name:", name ?? "App", settings.Yes, nav: nav);
+                        if (CliSupport.RejectFlagLike(name, "Project name"))
+                        {
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 2: // folder
+                        workspace ??= await CliSupport
+                            .ResolveWorkspaceAsync(discovery, cancellationToken)
+                            .ConfigureAwait(false);
+
+                        string suggested = FolderSuggester.SuggestProjectFolder(
+                            workspace.SolutionPath is not null,
+                            template!.ShortNames.FirstOrDefault() ?? template.Name);
+
+                        outputParent = CliSupport.RequireValue(
+                            console,
+                            settings.Output,
+                            "Folder (src/ or tests/):",
+                            outputParent ?? suggested,
+                            settings.Yes,
+                            allowEmpty: true,
+                            nav);
+                        nav.Next();
+                        break;
+                }
+            }
+            catch (PromptCancelledException)
+            {
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
         }
 
-        string templateShortName = template.ShortNames.FirstOrDefault() ?? template.Name;
-        string name = CliSupport.RequireValue(console, settings.Name, "Project name:", "App", settings.Yes);
-        if (CliSupport.RejectFlagLike(name, "Project name"))
-        {
-            return 1;
-        }
-
-        WorkspaceContext workspace = await CliSupport
-            .ResolveWorkspaceAsync(discovery, cancellationToken)
-            .ConfigureAwait(false);
-
-        string suggested = FolderSuggester.SuggestProjectFolder(
-            workspace.SolutionPath is not null,
-            templateShortName);
-
-        string outputParent = CliSupport.RequireValue(
-            console, settings.Output, "Folder (src/ or tests/):", suggested, settings.Yes, allowEmpty: true);
-
-        string projectDirectory = CliSupport.ComposeProjectDirectory(outputParent, name);
+        string templateShortName = template!.ShortNames.FirstOrDefault() ?? template.Name;
+        string projectDirectory = CliSupport.ComposeProjectDirectory(outputParent, name!);
 
         var projectService = new ProjectService(mutating);
         DotnetResult create = await projectService
-            .CreateAsync(templateShortName, name, projectDirectory, cancellationToken)
+            .CreateAsync(templateShortName, name!, projectDirectory, cancellationToken)
             .ConfigureAwait(false);
 
         // A failed create must be reported as such: never add-to-sln, never claim success.
@@ -210,7 +304,7 @@ public static class NewProjectFlow
         // created as fsproj/vbproj): deterministic <name>.*proj lookup, clear error otherwise.
         string? projectFile = create.DryRun
             ? Path.Combine(projectDirectory, name + ".csproj")
-            : CreatedFileResolver.FindProjectFile(projectDirectory, name);
+            : CreatedFileResolver.FindProjectFile(projectDirectory, name!);
         if (projectFile is null)
         {
             CliSupport.PrintError($"Could not find the created project file ({name}.*proj) under {projectDirectory}.");
@@ -218,6 +312,10 @@ public static class NewProjectFlow
         }
 
         CliSupport.PrintOutcome(create, $"Created {projectFile}", $"would create {projectFile}");
+
+        workspace ??= await CliSupport
+            .ResolveWorkspaceAsync(discovery, cancellationToken)
+            .ConfigureAwait(false);
 
         bool shouldAdd = settings.AddToSln ||
             (!settings.NoAddToSln && workspace.SolutionPath is not null);
@@ -247,20 +345,11 @@ public static class NewProjectFlow
         return 0;
     }
 
-    private static TemplateInfo? ResolveTemplate(
-        IAnsiConsole console,
-        IReadOnlyList<TemplateInfo> projectTemplates,
-        NewProjectSettings settings,
-        CancellationToken cancellationToken)
+    private static TemplateInfo? FindTemplate(IReadOnlyList<TemplateInfo> projectTemplates, string provided)
     {
-        if (!string.IsNullOrWhiteSpace(settings.Template))
-        {
-            TemplateInfo? byShortName = projectTemplates.FirstOrDefault(t =>
-                t.ShortNames.Contains(settings.Template!, StringComparer.OrdinalIgnoreCase));
-            return byShortName ?? projectTemplates.FirstOrDefault(t =>
-                t.Name.Equals(settings.Template!, StringComparison.OrdinalIgnoreCase));
-        }
-
-        return CliSupport.ChooseTemplate(console, projectTemplates, settings.Query, settings.Yes);
+        TemplateInfo? byShortName = projectTemplates.FirstOrDefault(t =>
+            t.ShortNames.Contains(provided, StringComparer.OrdinalIgnoreCase));
+        return byShortName ?? projectTemplates.FirstOrDefault(t =>
+            t.Name.Equals(provided, StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -72,7 +72,10 @@ public static class CliSupport
 
     /// <summary>
     /// Picks one item: single candidate short-circuits, <c>--yes</c> takes the top-ranked
-    /// candidate, otherwise an interactive <see cref="FuzzyPicker{T}"/> is used.
+    /// candidate, otherwise an interactive <see cref="FuzzyPicker{T}"/> is used. When the picker
+    /// is really shown the step is recorded in <paramref name="nav"/> (so Esc can rewind to it)
+    /// and <paramref name="initialSelection"/> preselects the remembered choice; Esc raises
+    /// <see cref="PromptCancelledException"/> (the flow's back signal).
     /// </summary>
     public static T? Choose<T>(
         IAnsiConsole console,
@@ -83,7 +86,9 @@ public static class CliSupport
         Func<T, IReadOnlyList<string>>? detail,
         IComparer<T>? tiebreak,
         string? query,
-        bool yes)
+        bool yes,
+        FlowNavigator? nav = null,
+        T? initialSelection = default)
     {
         if (items.Count == 0)
         {
@@ -108,6 +113,9 @@ public static class CliSupport
                 "Provide --query/--name/--project to select explicitly, or --yes for non-interactive mode.");
         }
 
+        // The dialog is really about to ask: record the step and derive its Esc hint.
+        EscHint escHint = nav?.Ask() ?? EscHint.Cancel;
+
         var picker = new FuzzyPicker<T>(
             console,
             items,
@@ -119,6 +127,8 @@ public static class CliSupport
                 Title = title,
                 Tiebreak = tiebreak,
                 InitialQuery = query,
+                InitialSelection = initialSelection,
+                EscHint = escHint,
             });
 
         return picker.Pick();
@@ -129,7 +139,9 @@ public static class CliSupport
         IAnsiConsole console,
         IReadOnlyList<TemplateInfo> candidates,
         string? query,
-        bool yes) =>
+        bool yes,
+        FlowNavigator? nav = null,
+        TemplateInfo? initialSelection = null) =>
         Choose(
             console,
             "templates",
@@ -139,7 +151,9 @@ public static class CliSupport
             TemplateSearch.PickerOptions().DetailLines,
             TemplateSearch.TypeTiebreak,
             query,
-            yes);
+            yes,
+            nav,
+            initialSelection);
 
     /// <summary>Project picker over absolute project paths.</summary>
     public static string? ChooseProject(
@@ -147,7 +161,9 @@ public static class CliSupport
         IReadOnlyList<string> projectPaths,
         string title,
         string? query,
-        bool yes) =>
+        bool yes,
+        FlowNavigator? nav = null,
+        string? initialSelection = null) =>
         Choose(
             console,
             title,
@@ -157,16 +173,23 @@ public static class CliSupport
             static p => new[] { p },
             tiebreak: null,
             query,
-            yes);
+            yes,
+            nav,
+            initialSelection);
 
-    /// <summary>Returns a provided value or prompts/default under <c>--yes</c>.</summary>
+    /// <summary>
+    /// Returns a provided value or prompts/default under <c>--yes</c>. When the prompt is really
+    /// shown the step is recorded in <paramref name="nav"/> (Esc rewinds to it) and its Esc hint
+    /// is derived from the flow position.
+    /// </summary>
     public static string RequireValue(
         IAnsiConsole console,
         string? provided,
         string promptText,
         string defaultValue,
         bool yes,
-        bool allowEmpty = false)
+        bool allowEmpty = false,
+        FlowNavigator? nav = null)
     {
         if (!string.IsNullOrWhiteSpace(provided))
         {
@@ -178,9 +201,12 @@ public static class CliSupport
             return defaultValue;
         }
 
+        EscHint escHint = nav?.Ask() ?? EscHint.Cancel;
         return allowEmpty
-            ? Prompts.AskFolder(console, promptText, defaultValue.Length > 0 ? defaultValue : null)
-            : Prompts.AskName(console, promptText, defaultValue.Length > 0 ? defaultValue : null);
+            ? Prompts.AskFolder(
+                console, promptText, defaultValue.Length > 0 ? defaultValue : null, escHint: escHint)
+            : Prompts.AskName(
+                console, promptText, defaultValue.Length > 0 ? defaultValue : null, escHint: escHint);
     }
 
     // Result messages go through OutputChannel: while a ScreenSession owns the alternate

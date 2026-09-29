@@ -36,14 +36,16 @@ public sealed class FuzzyPickerTests
     }
 
     [Fact]
-    public void Esc_cancels_and_returns_default()
+    public void Esc_raises_the_unified_back_signal()
     {
+        // Esc unification (back-navigation report): pickers and prompts share ONE signal,
+        // PromptCancelledException, which the surrounding FlowNavigator turns into "go back".
         var console = new TestConsole();
         var picker = NewPicker(console, ScriptedKeyReader.From(ConsoleKey.Escape));
 
-        string? picked = picker.Pick(TestContext.Current.CancellationToken);
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
 
-        picked.Should().BeNull();
+        act.Should().Throw<PromptCancelledException>();
     }
 
     [Fact]
@@ -52,8 +54,9 @@ public sealed class FuzzyPickerTests
         var console = new TestConsole();
         var picker = NewPicker(console, ScriptedKeyReader.From(ConsoleKey.Tab, ConsoleKey.Escape));
 
-        picker.Pick(TestContext.Current.CancellationToken);
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
 
+        act.Should().Throw<PromptCancelledException>();
         console.Output.Should().Contain("detail");
         console.Output.Should().Contain("item: Alpha");
     }
@@ -108,8 +111,9 @@ public sealed class FuzzyPickerTests
             return new ConsoleKeyInfo('\0', ConsoleKey.Escape, false, false, false);
         });
 
-        NewPicker(console, keys).Pick(TestContext.Current.CancellationToken);
+        Action act = () => NewPicker(console, keys).Pick(TestContext.Current.CancellationToken);
 
+        act.Should().Throw<PromptCancelledException>();
         outputAtFirstKey.Should().Contain("Alpha", "the list must already be on screen");
         outputAtFirstKey.Should().Contain("Enter select", "the hints must already be on screen");
     }
@@ -133,8 +137,9 @@ public sealed class FuzzyPickerTests
                 KeyReader = ScriptedKeyReader.From(ConsoleKey.Escape),
             });
 
-        picker.Pick(TestContext.Current.CancellationToken);
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
 
+        act.Should().Throw<PromptCancelledException>();
         console.Output.Should().Contain("Item12", "the configured page size (12) must be honoured");
     }
 
@@ -145,8 +150,9 @@ public sealed class FuzzyPickerTests
         console.EmitAnsiSequences();
         var picker = NewPicker(console, ScriptedKeyReader.From(ConsoleKey.Escape));
 
-        picker.Pick(TestContext.Current.CancellationToken);
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
 
+        act.Should().Throw<PromptCancelledException>();
         console.Output.Should().NotContain("\u001b[?1049h", "tests must not touch the terminal buffer");
         console.Output.Should().NotContain("\u001b[?1049l");
     }
@@ -169,11 +175,98 @@ public sealed class FuzzyPickerTests
                 KeyReader = ScriptedKeyReader.From(ConsoleKey.Escape),
             });
 
-        picker.Pick(TestContext.Current.CancellationToken);
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
 
+        act.Should().Throw<PromptCancelledException>();
         console.Output.Should().Contain("DotHelper");
         console.Output.Should().Contain("1.2.3");
         console.Output.Should().Contain("hint line", "the header renders as the first lines of the frame");
+    }
+
+    [Fact]
+    public void The_canonical_banner_renders_by_default_without_call_site_wiring()
+    {
+        // Universal-header report: FuzzyPicker renders the AppHeader banner on its own —
+        // no call site passes it. The banner is the FIRST line of the frame.
+        var console = new TestConsole();
+        var picker = NewPicker(console, ScriptedKeyReader.From(ConsoleKey.Escape));
+
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
+
+        act.Should().Throw<PromptCancelledException>();
+        console.Output.Should().Contain("DotHelper", "the canonical banner is rendered by default");
+        console.Output.Should().Contain("asistente para .NET", "the banner is the AppHeader one");
+        console.Output.IndexOf("DotHelper", StringComparison.Ordinal)
+            .Should().BeLessThan(console.Output.IndexOf("Alpha", StringComparison.Ordinal), "the header is the first line");
+    }
+
+    [Fact]
+    public void An_empty_header_suppresses_the_banner()
+    {
+        // Override/suppression seam for tests and header-less surfaces.
+        var console = new TestConsole();
+        var picker = new FuzzyPicker<string>(
+            console,
+            ["Alpha"],
+            new FuzzyPickerOptions<string>
+            {
+                PrimaryText = static s => s,
+                Fields = static s => [new WeightedField(s, WeightedField.NameWeight)],
+                Title = "demo",
+                Header = [],
+                KeyReader = ScriptedKeyReader.From(ConsoleKey.Escape),
+            });
+
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
+
+        act.Should().Throw<PromptCancelledException>();
+        console.Output.Should().NotContain("asistente para .NET", "an empty header suppresses the banner");
+    }
+
+    [Fact]
+    public void The_esc_hint_is_contextual()
+    {
+        // Back-navigation report: "Esc back"/"Esc exit"/"Esc cancel" per context.
+        var console = new TestConsole();
+        var picker = new FuzzyPicker<string>(
+            console,
+            ["Alpha"],
+            new FuzzyPickerOptions<string>
+            {
+                PrimaryText = static s => s,
+                Fields = static s => [new WeightedField(s, WeightedField.NameWeight)],
+                Title = "demo",
+                EscHint = EscHint.Back,
+                KeyReader = ScriptedKeyReader.From(ConsoleKey.Escape),
+            });
+
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
+
+        act.Should().Throw<PromptCancelledException>();
+        console.Output.Should().Contain("Esc back");
+        console.Output.Should().NotContain("Esc cancel", "the hint follows the dialog context");
+    }
+
+    [Fact]
+    public void Initial_selection_preselects_the_remembered_item()
+    {
+        // "Keep what was chosen": a re-opened picker starts on the previous choice.
+        var console = new TestConsole();
+        var picker = new FuzzyPicker<string>(
+            console,
+            ["Alpha", "Bravo", "Charlie"],
+            new FuzzyPickerOptions<string>
+            {
+                PrimaryText = static s => s,
+                Fields = static s => [new WeightedField(s, WeightedField.NameWeight)],
+                Title = "demo",
+                InitialSelection = "Charlie",
+                KeyReader = ScriptedKeyReader.From(ConsoleKey.Enter),
+            });
+
+        string? picked = picker.Pick(TestContext.Current.CancellationToken);
+
+        picked.Should().Be("Charlie", "Enter keeps the preselected item");
     }
 
     [Fact]
@@ -198,8 +291,9 @@ public sealed class FuzzyPickerTests
                 KeyReader = ScriptedKeyReader.From(ConsoleKey.Tab, ConsoleKey.Escape),
             });
 
-        picker.Pick(TestContext.Current.CancellationToken);
+        Action act = () => picker.Pick(TestContext.Current.CancellationToken);
 
+        act.Should().Throw<PromptCancelledException>();
         console.Output.Should().Contain("detail");
         console.Output.Should().Contain("d5", "the whole detail block is shown");
         console.Output.Should().Contain("Item12", "the configured page size is kept for tests");

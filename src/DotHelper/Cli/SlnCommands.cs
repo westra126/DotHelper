@@ -88,18 +88,42 @@ public sealed class SlnAddCommand : AsyncCommand<SlnAddSettings>
             .Where(p => !already.Contains(p))
             .ToList();
 
-        string? projectPath = ResolveProject(console, settings.Project, candidates, settings.Query, settings.Yes);
-        if (projectPath is null)
+        // Single interactive step (the project picker): Esc exits the flow at once.
+        string? projectPath = null;
+        FlowNavigator nav = new();
+        while (true)
         {
-            CliSupport.PrintError(candidates.Count == 0
-                ? "No candidate projects found under the solution root."
-                : "No project selected.");
-            return 1;
+            try
+            {
+                if (nav.Step > 0)
+                {
+                    break;
+                }
+
+                projectPath = ResolveProject(
+                    console, settings.Project, candidates, settings.Query, settings.Yes, nav, projectPath);
+                if (projectPath is null)
+                {
+                    CliSupport.PrintError(candidates.Count == 0
+                        ? "No candidate projects found under the solution root."
+                        : "No project selected.");
+                    return 1;
+                }
+
+                nav.Next();
+            }
+            catch (PromptCancelledException)
+            {
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
         }
 
         var mutatingSolution = new SolutionService(mutating);
         DotnetResult result = await mutatingSolution
-            .AddProjectAsync(workspace.SolutionPath, projectPath, cancellationToken)
+            .AddProjectAsync(workspace.SolutionPath, projectPath!, cancellationToken)
             .ConfigureAwait(false);
 
         string slnName = Path.GetFileName(workspace.SolutionPath);
@@ -115,7 +139,9 @@ public sealed class SlnAddCommand : AsyncCommand<SlnAddSettings>
         string? provided,
         IReadOnlyList<string> candidates,
         string? query,
-        bool yes)
+        bool yes,
+        FlowNavigator? nav = null,
+        string? initialSelection = null)
     {
         if (!string.IsNullOrWhiteSpace(provided))
         {
@@ -123,7 +149,7 @@ public sealed class SlnAddCommand : AsyncCommand<SlnAddSettings>
             return File.Exists(full) ? full : null;
         }
 
-        return CliSupport.ChooseProject(console, candidates, "project", query, yes);
+        return CliSupport.ChooseProject(console, candidates, "project", query, yes, nav, initialSelection);
     }
 }
 
@@ -159,18 +185,47 @@ public sealed class SlnRemoveCommand : AsyncCommand<SlnRemoveSettings>
             return 1;
         }
 
-        string? projectPath = SlnAddCommand.ResolveProject(
-            console, settings.Project, workspace.SolutionProjectPaths, settings.Query, settings.Yes);
-
-        if (projectPath is null)
+        // Single interactive step (the project picker): Esc exits the flow at once.
+        string? projectPath = null;
+        FlowNavigator nav = new();
+        while (true)
         {
-            CliSupport.PrintError("No project selected.");
-            return 1;
+            try
+            {
+                if (nav.Step > 0)
+                {
+                    break;
+                }
+
+                projectPath = SlnAddCommand.ResolveProject(
+                    console,
+                    settings.Project,
+                    workspace.SolutionProjectPaths,
+                    settings.Query,
+                    settings.Yes,
+                    nav,
+                    projectPath);
+
+                if (projectPath is null)
+                {
+                    CliSupport.PrintError("No project selected.");
+                    return 1;
+                }
+
+                nav.Next();
+            }
+            catch (PromptCancelledException)
+            {
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
         }
 
         var solutionService = new SolutionService(mutating);
         DotnetResult result = await solutionService
-            .RemoveProjectAsync(workspace.SolutionPath, projectPath, cancellationToken)
+            .RemoveProjectAsync(workspace.SolutionPath, projectPath!, cancellationToken)
             .ConfigureAwait(false);
 
         string slnName = Path.GetFileName(workspace.SolutionPath);

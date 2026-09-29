@@ -70,7 +70,67 @@ public sealed class PromptsTests
         Action act = () => Prompts.AskName(console, "Name:", keyReader: Keys(ConsoleKey.Escape));
 
         act.Should().Throw<PromptCancelledException>();
-        console.Output.Should().Contain("Esc to cancel");
+        console.Output.Should().Contain("Esc cancel", "the default hint says what Esc does");
+    }
+
+    [Fact]
+    public void The_canonical_banner_renders_in_prompts_by_default()
+    {
+        // Universal-header report: Name/Folder/Confirm dialogs show the banner with no call-site
+        // wiring (AppHeader is the single source).
+        var console = new TestConsole();
+
+        string value = Prompts.AskName(
+            console, "Name:", keyReader: Keys('A', ConsoleKey.Enter));
+
+        value.Should().Be("A");
+        console.Output.Should().Contain("DotHelper", "the banner is rendered by default");
+        console.Output.Should().Contain("asistente para .NET");
+        console.Output.IndexOf("DotHelper", StringComparison.Ordinal)
+            .Should().BeLessThan(console.Output.IndexOf("Name:", StringComparison.Ordinal), "the banner is above the input line");
+    }
+
+    [Fact]
+    public void The_banner_renders_in_confirm_prompts_too()
+    {
+        var console = new TestConsole();
+
+        bool answer = Prompts.Confirm(console, "Sure?", defaultValue: true, keyReader: Keys(ConsoleKey.Enter));
+
+        answer.Should().BeTrue();
+        console.Output.Should().Contain("asistente para .NET", "confirmation dialogs show the banner as well");
+    }
+
+    [Fact]
+    public void The_prompt_header_can_be_overridden_or_suppressed()
+    {
+        var overriden = new TestConsole();
+        var suppressed = new TestConsole();
+
+        Prompts.AskName(
+            overriden, "Name:", keyReader: Keys('A', ConsoleKey.Enter), header: ["[grey]custom header[/]"]);
+        Prompts.AskFolder(
+            suppressed, "Folder:", keyReader: Keys(ConsoleKey.Enter), header: []);
+
+        overriden.Output.Should().Contain("custom header");
+        overriden.Output.Should().NotContain("asistente para .NET", "an override replaces the banner");
+        suppressed.Output.Should().NotContain("asistente para .NET", "an empty header suppresses the banner");
+        suppressed.Output.Should().Contain("Folder:");
+    }
+
+    [Theory]
+    [InlineData(EscHint.Cancel, "Esc cancel")]
+    [InlineData(EscHint.Back, "Esc back")]
+    [InlineData(EscHint.Exit, "Esc exit")]
+    public void The_esc_hint_of_a_prompt_is_contextual(EscHint hint, string expected)
+    {
+        var console = new TestConsole();
+
+        Action act = () => Prompts.AskName(
+            console, "Name:", keyReader: Keys(ConsoleKey.Escape), escHint: hint);
+
+        act.Should().Throw<PromptCancelledException>();
+        console.Output.Should().Contain(expected);
     }
 
     [Fact]

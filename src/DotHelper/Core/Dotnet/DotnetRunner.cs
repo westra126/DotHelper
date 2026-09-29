@@ -39,6 +39,11 @@ public sealed class DotnetRunner : IDotnetRunner
     {
         ArgumentNullException.ThrowIfNull(args);
 
+        // Ctrl+C (user report): link the caller's token with the process-wide interrupt so a
+        // SIGINT during a `dotnet` run cancels this wait and kills the whole process tree below.
+        using CancellationTokenSource linked = AppInterrupt.Link(cancellationToken);
+        CancellationToken token = linked.Token;
+
         List<string> argList = args as List<string> ?? args.ToList();
         string commandLine = BuildCommandLine(argList);
         string workDir = string.IsNullOrWhiteSpace(workDir = workingDir ?? Environment.CurrentDirectory)
@@ -83,7 +88,7 @@ public sealed class DotnetRunner : IDotnetRunner
 
         process.Start();
 
-        using CancellationTokenRegistration registration = cancellationToken.Register(
+        using CancellationTokenRegistration registration = token.Register(
             static state =>
             {
                 Process p = (Process)state!;
@@ -108,15 +113,15 @@ public sealed class DotnetRunner : IDotnetRunner
         StringBuilder stdOut = new();
         StringBuilder stdErr = new();
 
-        Task pumpOut = PumpAsync(process.StandardOutput, stdOut, onStdOutLine, cancellationToken);
-        Task pumpErr = PumpAsync(process.StandardError, stdErr, onStdErrLine, cancellationToken);
+        Task pumpOut = PumpAsync(process.StandardOutput, stdOut, onStdOutLine, token);
+        Task pumpErr = PumpAsync(process.StandardError, stdErr, onStdErrLine, token);
 
         try
         {
             // Safety net: if cancellation slips past the kill handler, do not wait forever.
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await process.WaitForExitAsync(token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             // Cancellation is the caller's request: drain the pumps best-effort and propagate.
             await DrainAsync(pumpOut, pumpErr).ConfigureAwait(false);
@@ -125,7 +130,7 @@ public sealed class DotnetRunner : IDotnetRunner
 
         await Task.WhenAll(pumpOut, pumpErr).ConfigureAwait(false);
 
-        cancellationToken.ThrowIfCancellationRequested();
+        token.ThrowIfCancellationRequested();
 
         string stdout = stdOut.ToString();
         string stderr = stdErr.ToString();

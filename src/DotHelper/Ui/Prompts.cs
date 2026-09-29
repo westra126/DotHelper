@@ -13,51 +13,60 @@ namespace DotHelper.Ui;
 /// cancelling a text dialog with Esc was impossible. This editor keeps the documented
 /// semantics — <see cref="AskName"/> requires a value (defaults when given), <see cref="AskFolder"/>
 /// allows empty, <see cref="Confirm"/> is y/n with a default — and adds Esc (→
-/// <see cref="PromptCancelledException"/>), Ctrl+C (→ <see cref="OperationCanceledException"/>) and
-/// Unicode-safe backspace. Keys come from <see cref="IKeyReader"/> like
-/// <see cref="FuzzyPicker{T}"/>; the line repaints per keystroke through
-/// <see cref="LiveDisplay"/> so echo/backspace stay correct for any text element.
+/// <see cref="PromptCancelledException"/>, the back signal of <see cref="FlowNavigator"/>),
+/// Ctrl+C (→ <see cref="OperationCanceledException"/>) and Unicode-safe backspace. Keys come
+/// from <see cref="IKeyReader"/> like <see cref="FuzzyPicker{T}"/>; the line repaints per
+/// keystroke through <see cref="LiveDisplay"/> so echo/backspace stay correct for any text
+/// element. The canonical banner (<see cref="AppHeader"/>) renders at the top of every prompt
+/// by default; the Esc hint is contextual (<see cref="EscHintText"/>).
 /// </summary>
 public static class Prompts
 {
-    private const string CancelHint = "Esc to cancel";
-
     /// <summary>Asks for a non-empty name (project, class, solution…).</summary>
+    /// <param name="header"><c>null</c> renders the canonical banner, empty suppresses it, non-empty overrides it.</param>
     /// <exception cref="PromptCancelledException">Esc was pressed.</exception>
     /// <exception cref="OperationCanceledException">Ctrl+C was pressed.</exception>
     public static string AskName(
         IAnsiConsole console,
         string prompt,
         string? defaultValue = null,
-        IKeyReader? keyReader = null)
+        IKeyReader? keyReader = null,
+        IReadOnlyList<string>? header = null,
+        EscHint escHint = EscHint.Cancel)
     {
         ArgumentNullException.ThrowIfNull(console);
 
-        return ReadText(console, prompt, defaultValue, allowEmpty: false, keyReader);
+        return ReadText(console, prompt, defaultValue, allowEmpty: false, keyReader, header, escHint);
     }
 
     /// <summary>Asks for a folder path (may be empty, meaning "project root").</summary>
+    /// <param name="header"><c>null</c> renders the canonical banner, empty suppresses it, non-empty overrides it.</param>
     /// <exception cref="PromptCancelledException">Esc was pressed.</exception>
     /// <exception cref="OperationCanceledException">Ctrl+C was pressed.</exception>
     public static string AskFolder(
         IAnsiConsole console,
         string prompt,
         string? defaultValue = null,
-        IKeyReader? keyReader = null)
+        IKeyReader? keyReader = null,
+        IReadOnlyList<string>? header = null,
+        EscHint escHint = EscHint.Cancel)
     {
         ArgumentNullException.ThrowIfNull(console);
 
-        return ReadText(console, prompt, defaultValue, allowEmpty: true, keyReader);
+        return ReadText(console, prompt, defaultValue, allowEmpty: true, keyReader, header, escHint);
     }
 
     /// <summary>Yes/no confirmation with a default.</summary>
+    /// <param name="header"><c>null</c> renders the canonical banner, empty suppresses it, non-empty overrides it.</param>
     /// <exception cref="PromptCancelledException">Esc was pressed.</exception>
     /// <exception cref="OperationCanceledException">Ctrl+C was pressed.</exception>
     public static bool Confirm(
         IAnsiConsole console,
         string prompt,
         bool defaultValue = true,
-        IKeyReader? keyReader = null)
+        IKeyReader? keyReader = null,
+        IReadOnlyList<string>? header = null,
+        EscHint escHint = EscHint.Cancel)
     {
         ArgumentNullException.ThrowIfNull(console);
 
@@ -69,10 +78,10 @@ public static class Prompts
         string typed = string.Empty;
         bool? accepted = null;
 
-        LiveDisplay live = console.Live(BuildConfirm(prompt, defaultValue, typed)).AutoClear(true);
+        LiveDisplay live = console.Live(BuildConfirm(prompt, defaultValue, typed, header, escHint)).AutoClear(true);
         live.Start(ctx =>
         {
-            ctx.UpdateTarget(BuildConfirm(prompt, defaultValue, typed));
+            ctx.UpdateTarget(BuildConfirm(prompt, defaultValue, typed, header, escHint));
             ctx.Refresh();
 
             while (accepted is null)
@@ -106,7 +115,7 @@ public static class Prompts
 
                 if (accepted is null)
                 {
-                    ctx.UpdateTarget(BuildConfirm(prompt, defaultValue, typed));
+                    ctx.UpdateTarget(BuildConfirm(prompt, defaultValue, typed, header, escHint));
                     ctx.Refresh();
                 }
             }
@@ -119,14 +128,16 @@ public static class Prompts
     /// Shared line editor: printable characters (Unicode included), Backspace (drops the last
     /// text element), Enter (accept; empty takes <paramref name="defaultValue"/>, or the empty
     /// string when <paramref name="allowEmpty"/>, otherwise it is rejected silently and the
-    /// prompt keeps editing), Esc (cancel) and Ctrl+C (process cancel).
+    /// prompt keeps editing), Esc (back/cancel) and Ctrl+C (process cancel).
     /// </summary>
     private static string ReadText(
         IAnsiConsole console,
         string prompt,
         string? defaultValue,
         bool allowEmpty,
-        IKeyReader? keyReader)
+        IKeyReader? keyReader,
+        IReadOnlyList<string>? header,
+        EscHint escHint)
     {
         ScreenSession.EnsureOpen(console, keyReader is not null);
 
@@ -136,10 +147,10 @@ public static class Prompts
         string value = string.Empty;
         string? accepted = null;
 
-        LiveDisplay live = console.Live(BuildLine(prompt, defaultValue, value)).AutoClear(true);
+        LiveDisplay live = console.Live(BuildLine(prompt, defaultValue, value, header, escHint)).AutoClear(true);
         live.Start(ctx =>
         {
-            ctx.UpdateTarget(BuildLine(prompt, defaultValue, value));
+            ctx.UpdateTarget(BuildLine(prompt, defaultValue, value, header, escHint));
             ctx.Refresh();
 
             while (accepted is null)
@@ -186,7 +197,7 @@ public static class Prompts
 
                 if (accepted is null)
                 {
-                    ctx.UpdateTarget(BuildLine(prompt, defaultValue, value));
+                    ctx.UpdateTarget(BuildLine(prompt, defaultValue, value, header, escHint));
                     ctx.Refresh();
                 }
             }
@@ -195,26 +206,34 @@ public static class Prompts
         return accepted ?? throw new InvalidOperationException("The prompt ended without an accepted value.");
     }
 
-    /// <summary>Text prompt view: input line (with cursor block) + Esc hint.</summary>
-    private static Rows BuildLine(string prompt, string? defaultValue, string value)
+    /// <summary>Text prompt view: banner, input line (with cursor block) + contextual Esc hint.</summary>
+    private static Rows BuildLine(string prompt, string? defaultValue, string value, IReadOnlyList<string>? header, EscHint escHint)
     {
         string head = ComposeHead(prompt, defaultDisplay: defaultValue, showChoices: false);
-        return PromptRows($"{head}{Markup.Escape(value)}█");
+        return PromptRows($"{head}{Markup.Escape(value)}█", header, escHint);
     }
 
-    /// <summary>Confirm view: <c>Sure? [y/n] (y): y█</c> + Esc hint.</summary>
-    private static Rows BuildConfirm(string prompt, bool defaultValue, string typed)
+    /// <summary>Confirm view: banner + <c>Sure? [y/n] (y): y█</c> + contextual Esc hint.</summary>
+    private static Rows BuildConfirm(string prompt, bool defaultValue, string typed, IReadOnlyList<string>? header, EscHint escHint)
     {
         string head = ComposeHead(prompt, defaultDisplay: defaultValue ? "y" : "n", showChoices: true);
-        return PromptRows($"{head}{Markup.Escape(typed)}█");
+        return PromptRows($"{head}{Markup.Escape(typed)}█", header, escHint);
     }
 
-    private static Rows PromptRows(string inputLine) =>
-        new(new List<IRenderable>
+    private static Rows PromptRows(string inputLine, IReadOnlyList<string>? header, EscHint escHint)
+    {
+        List<IRenderable> elements = [];
+
+        // Header: the canonical banner by default (override/suppress per call site).
+        foreach (string line in header ?? AppHeader.Lines())
         {
-            new Markup(inputLine),
-            new Markup($"[{Theme.MutedMarkup}]{CancelHint}[/]"),
-        });
+            elements.Add(new Markup(line));
+        }
+
+        elements.Add(new Markup(inputLine));
+        elements.Add(new Markup($"[{Theme.MutedMarkup}]{EscHintText.For(escHint)}[/]"));
+        return new Rows(elements);
+    }
 
     /// <summary>
     /// Prompt head in the Spectre layout: <c>Name: (App): </c> / <c>Sure? [y/n] (y): </c> —

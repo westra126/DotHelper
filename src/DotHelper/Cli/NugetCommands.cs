@@ -206,14 +206,18 @@ public static class NugetFlow
     /// <summary>
     /// Resolves the target project: <paramref name="provided"/> (full path, file name or name
     /// name) or the active workspace (solution projects, else the closest project) with a
-    /// picker when several candidates exist. Returns <c>null</c> when nothing matches.
+    /// picker when several candidates exist. Returns <c>null</c> when nothing matches. The
+    /// picker participates in the flow's step machine (<paramref name="nav"/>) and preselects
+    /// the remembered choice.
     /// </summary>
     public static string? ResolveProject(
         IAnsiConsole console,
         string? provided,
         string? query,
         bool yes,
-        WorkspaceContext workspace)
+        WorkspaceContext workspace,
+        FlowNavigator? nav = null,
+        string? initialSelection = null)
     {
         IReadOnlyList<string> candidates = workspace.SolutionProjectPaths.Count > 0
             ? workspace.SolutionProjectPaths
@@ -235,7 +239,7 @@ public static class NugetFlow
                 Path.GetFileNameWithoutExtension(p).Equals(provided, StringComparison.OrdinalIgnoreCase));
         }
 
-        return CliSupport.ChooseProject(console, candidates, "project", query, yes);
+        return CliSupport.ChooseProject(console, candidates, "project", query, yes, nav, initialSelection);
     }
 
 }
@@ -307,18 +311,24 @@ public static class NugetAddFlow
 {
     /// <summary>
     /// Runs the flow inside one fullscreen session (user reports 1–3): project picker, search
-    /// prompt, package picker and version prompt share a single alternate screen.
+    /// prompt, package picker and version prompt share a single alternate screen. Esc rewinds
+    /// step by step keeping previous answers; Esc at the first interactive step exits the flow
+    /// (see <see cref="FlowNavigator"/> and <paramref name="firstStepEsc"/>).
     /// </summary>
-    public static Task<int> RunAsync(NugetAddSettings settings, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(
+        NugetAddSettings settings,
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc = EscHint.Cancel)
     {
         IAnsiConsole console = AnsiConsole.Console;
-        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken, firstStepEsc));
     }
 
     private static async Task<int> RunCoreAsync(
         IAnsiConsole console,
         NugetAddSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc)
     {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
@@ -329,130 +339,156 @@ public static class NugetAddFlow
             .ResolveWorkspaceAsync(discovery, cancellationToken)
             .ConfigureAwait(false);
 
-        string? projectFile = NugetFlow.ResolveProject(console, settings.Project, query: null, settings.Yes, workspace);
-        if (projectFile is null)
+        bool packageGiven = !string.IsNullOrWhiteSpace(settings.Package);
+        bool interactive = !settings.Yes && !Console.IsInputRedirected;
+
+        if (packageGiven && CliSupport.RejectFlagLike(settings.Package, "Package id"))
         {
-            CliSupport.PrintError(string.IsNullOrWhiteSpace(settings.Project)
-                ? "No project found (looking for .sln/.csproj upwards)."
-                : $"Project not found: {settings.Project}");
             return 1;
         }
 
-        ResolvedPackage? resolved = await ResolvePackageAsync(console, settings, searchService, cancellationToken)
-            .ConfigureAwait(false);
-        if (resolved is null)
+        // Answers kept across rewinds (see ItemFlow).
+        string? projectFile = null;
+        string? term = null;
+        IReadOnlyList<NugetPackageInfo>? results = null;
+        NugetPackageInfo? selected = null;
+        string? version = settings.Version;
+
+        FlowNavigator nav = new(firstStepEsc);
+        while (true)
         {
-            return 1;
+            try
+            {
+                if (nav.Step > 3)
+                {
+                    break;
+                }
+
+                switch (nav.Step)
+                {
+                    case 0: // project
+                        projectFile = NugetFlow.ResolveProject(
+                            console, settings.Project, query: null, settings.Yes, workspace, nav, projectFile);
+                        if (projectFile is null)
+                        {
+                            CliSupport.PrintError(string.IsNullOrWhiteSpace(settings.Project)
+                                ? "No project found (looking for .sln/.csproj upwards)."
+                                : $"Project not found: {settings.Project}");
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 1: // search term (auto when the package id is given)
+                        if (!packageGiven)
+                        {
+                            if (!string.IsNullOrWhiteSpace(settings.Query))
+                            {
+                                if (CliSupport.RejectFlagLike(settings.Query, "Search term"))
+                                {
+                                    return 1;
+                                }
+
+                                term = settings.Query!.Trim();
+                            }
+                            else if (!interactive)
+                            {
+                                CliSupport.PrintError(
+                                    "Provide a package id or --query when running non-interactively.");
+                                return 1;
+                            }
+                            else
+                            {
+                                term = Prompts.AskName(
+                                    console, "Search term:", term, escHint: nav.Ask());
+                            }
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 2: // package picker (auto under --yes or for a single hit)
+                        if (!packageGiven)
+                        {
+                            results ??= await searchService
+                                .SearchAsync(term!, NugetFlow.SearchTake, prerelease: false, cancellationToken)
+                                .ConfigureAwait(false);
+                            if (results.Count == 0)
+                            {
+                                CliSupport.PrintError($"No packages found for '{term}'.");
+                                return 1;
+                            }
+
+                            selected = settings.Yes
+                                ? results[0]
+                                : CliSupport.Choose(
+                                    console,
+                                    "packages",
+                                    results,
+                                    static p => p.Id,
+                                    NugetFlow.PackageFields,
+                                    NugetFlow.PackageDetail,
+                                    NugetFlow.DownloadsTiebreak,
+                                    query: null,
+                                    yes: false,
+                                    nav,
+                                    selected);
+
+                            if (selected is null)
+                            {
+                                CliSupport.PrintError("No package selected.");
+                                return 1;
+                            }
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 3: // version (auto when given or non-interactive)
+                        if (!packageGiven && string.IsNullOrWhiteSpace(settings.Version) && interactive)
+                        {
+                            version = CliSupport.RequireValue(
+                                console,
+                                provided: null,
+                                "Version (Enter = latest stable):",
+                                version ?? string.Empty,
+                                yes: false,
+                                allowEmpty: true,
+                                nav);
+                        }
+
+                        nav.Next();
+                        break;
+                }
+            }
+            catch (PromptCancelledException)
+            {
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
         }
+
+        ResolvedPackage resolved = packageGiven
+            ? new ResolvedPackage(
+                settings.Package!.Trim(),
+                string.IsNullOrWhiteSpace(settings.Version) ? null : settings.Version.Trim())
+            : new ResolvedPackage(
+                selected!.Id,
+                string.IsNullOrWhiteSpace(version) ? null : version!.Trim());
 
         DotnetResult result = await packageService
-            .AddAsync(projectFile, resolved.Id, resolved.Version, cancellationToken)
+            .AddAsync(projectFile!, resolved.Id, resolved.Version, cancellationToken)
             .ConfigureAwait(false);
 
-        string target = Path.GetFileName(projectFile);
+        string target = Path.GetFileName(projectFile!)!;
         return CliSupport.FinishMutation(
             settings,
             result,
             $"Added {resolved.Id} to {target}",
             $"would add {resolved.Id} to {target}");
-    }
-
-    /// <summary>
-    /// Package selection per PLAN.md §5.2: a given <c>package</c> goes straight to
-    /// <c>dotnet add</c>; otherwise a search term (from <c>--query</c> or a prompt) feeds the
-    /// search and a <see cref="FuzzyPicker{T}"/> with package details. Under <c>--yes</c> the
-    /// first search result is used without prompts.
-    /// </summary>
-    private static async Task<ResolvedPackage?> ResolvePackageAsync(
-        IAnsiConsole console,
-        NugetAddSettings settings,
-        NugetService service,
-        CancellationToken cancellationToken)
-    {
-        if (!string.IsNullOrWhiteSpace(settings.Package))
-        {
-            if (CliSupport.RejectFlagLike(settings.Package, "Package id"))
-            {
-                return null;
-            }
-
-            return new ResolvedPackage(
-                settings.Package!.Trim(),
-                string.IsNullOrWhiteSpace(settings.Version) ? null : settings.Version.Trim());
-        }
-
-        bool interactive = !settings.Yes && !Console.IsInputRedirected;
-
-        string term;
-        if (!string.IsNullOrWhiteSpace(settings.Query))
-        {
-            if (CliSupport.RejectFlagLike(settings.Query, "Search term"))
-            {
-                return null;
-            }
-
-            term = settings.Query!.Trim();
-        }
-        else if (!interactive)
-        {
-            CliSupport.PrintError("Provide a package id or --query when running non-interactively.");
-            return null;
-        }
-        else
-        {
-            term = Prompts.AskName(console, "Search term:");
-        }
-
-        IReadOnlyList<NugetPackageInfo> results = await service
-            .SearchAsync(term, NugetFlow.SearchTake, prerelease: false, cancellationToken)
-            .ConfigureAwait(false);
-        if (results.Count == 0)
-        {
-            CliSupport.PrintError($"No packages found for '{term}'.");
-            return null;
-        }
-
-        NugetPackageInfo? selected;
-        if (settings.Yes)
-        {
-            // `--yes --query X` → first result without prompts.
-            selected = results[0];
-        }
-        else
-        {
-            selected = CliSupport.Choose(
-                console,
-                "packages",
-                results,
-                static p => p.Id,
-                NugetFlow.PackageFields,
-                NugetFlow.PackageDetail,
-                NugetFlow.DownloadsTiebreak,
-                query: null,
-                yes: false);
-        }
-
-        if (selected is null)
-        {
-            CliSupport.PrintError("No package selected.");
-            return null;
-        }
-
-        string? version = settings.Version;
-        if (string.IsNullOrWhiteSpace(version) && interactive)
-        {
-            version = CliSupport.RequireValue(
-                console,
-                provided: null,
-                "Version (Enter = latest stable):",
-                string.Empty,
-                yes: false,
-                allowEmpty: true);
-        }
-
-        return new ResolvedPackage(
-            selected.Id,
-            string.IsNullOrWhiteSpace(version) ? null : version!.Trim());
     }
 
     private sealed record ResolvedPackage(string Id, string? Version);
@@ -462,16 +498,20 @@ public static class NugetAddFlow
 public static class NugetListFlow
 {
     /// <summary>Runs the flow inside one fullscreen session (the project picker may interact).</summary>
-    public static Task<int> RunAsync(NugetListSettings settings, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(
+        NugetListSettings settings,
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc = EscHint.Cancel)
     {
         IAnsiConsole console = AnsiConsole.Console;
-        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken, firstStepEsc));
     }
 
     private static async Task<int> RunCoreAsync(
         IAnsiConsole console,
         NugetListSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc)
     {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
 
@@ -479,13 +519,37 @@ public static class NugetListFlow
             .ResolveWorkspaceAsync(discovery, cancellationToken)
             .ConfigureAwait(false);
 
-        string? projectFile = NugetFlow.ResolveProject(console, settings.Project, query: null, settings.Yes, workspace);
-        if (projectFile is null)
+        // Single interactive step (the project picker): Esc exits the flow at once.
+        string? projectFile = null;
+        FlowNavigator nav = new(firstStepEsc);
+        while (true)
         {
-            CliSupport.PrintError(string.IsNullOrWhiteSpace(settings.Project)
-                ? "No project found (looking for .sln/.csproj upwards)."
-                : $"Project not found: {settings.Project}");
-            return 1;
+            try
+            {
+                if (nav.Step > 0)
+                {
+                    break;
+                }
+
+                projectFile = NugetFlow.ResolveProject(
+                    console, settings.Project, query: null, settings.Yes, workspace, nav, projectFile);
+                if (projectFile is null)
+                {
+                    CliSupport.PrintError(string.IsNullOrWhiteSpace(settings.Project)
+                        ? "No project found (looking for .sln/.csproj upwards)."
+                        : $"Project not found: {settings.Project}");
+                    return 1;
+                }
+
+                nav.Next();
+            }
+            catch (PromptCancelledException)
+            {
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
         }
 
         if (settings.DryRun)
@@ -493,7 +557,7 @@ public static class NugetListFlow
             var dryRunner = new DotnetRunner(new DotnetRunnerOptions { DryRun = true });
             DotnetResult preview = await dryRunner
                 .RunAsync(
-                    NugetService.BuildListArgs(projectFile, settings.IncludeTransitive),
+                    NugetService.BuildListArgs(projectFile!, settings.IncludeTransitive),
                     workingDir: null,
                     cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
@@ -503,7 +567,7 @@ public static class NugetListFlow
 
         var service = new NugetService(discovery);
         IReadOnlyList<InstalledPackage> packages = await service
-            .ListAsync(projectFile, settings.IncludeTransitive, cancellationToken)
+            .ListAsync(projectFile!, settings.IncludeTransitive, cancellationToken)
             .ConfigureAwait(false);
 
         if (settings.Json)
@@ -536,16 +600,20 @@ public static class NugetListFlow
 public static class NugetRemoveFlow
 {
     /// <summary>Runs the flow inside one fullscreen session (the pickers interact).</summary>
-    public static Task<int> RunAsync(NugetRemoveSettings settings, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(
+        NugetRemoveSettings settings,
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc = EscHint.Cancel)
     {
         IAnsiConsole console = AnsiConsole.Console;
-        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken));
+        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, cancellationToken, firstStepEsc));
     }
 
     private static async Task<int> RunCoreAsync(
         IAnsiConsole console,
         NugetRemoveSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc)
     {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
@@ -554,70 +622,110 @@ public static class NugetRemoveFlow
             .ResolveWorkspaceAsync(discovery, cancellationToken)
             .ConfigureAwait(false);
 
-        string? projectFile = NugetFlow.ResolveProject(console, settings.Project, query: null, settings.Yes, workspace);
-        if (projectFile is null)
-        {
-            CliSupport.PrintError(string.IsNullOrWhiteSpace(settings.Project)
-                ? "No project found (looking for .sln/.csproj upwards)."
-                : $"Project not found: {settings.Project}");
-            return 1;
-        }
-
         string? packageId = settings.Package?.Trim();
         if (!string.IsNullOrWhiteSpace(packageId) && CliSupport.RejectFlagLike(packageId, "Package id"))
         {
             return 1;
         }
 
-        if (string.IsNullOrWhiteSpace(packageId))
+        bool packageGiven = !string.IsNullOrWhiteSpace(packageId);
+
+        // Answers kept across rewinds (see ItemFlow).
+        string? projectFile = null;
+        InstalledPackage? selected = null;
+
+        FlowNavigator nav = new(firstStepEsc);
+        while (true)
         {
-            var searchService = new NugetService(discovery);
-
-            // Only top-level references can be removed, so the picker lists those.
-            IReadOnlyList<InstalledPackage> installed = await searchService
-                .ListAsync(projectFile, includeTransitive: false, cancellationToken)
-                .ConfigureAwait(false);
-            if (installed.Count == 0)
+            try
             {
-                CliSupport.PrintError($"No packages installed in {Path.GetFileName(projectFile)}.");
-                return 1;
-            }
+                if (nav.Step > 1)
+                {
+                    break;
+                }
 
-            bool interactive = !settings.Yes && !Console.IsInputRedirected;
-            if (!interactive && string.IsNullOrWhiteSpace(settings.Query) && installed.Count != 1)
+                switch (nav.Step)
+                {
+                    case 0: // project
+                        projectFile = NugetFlow.ResolveProject(
+                            console, settings.Project, query: null, settings.Yes, workspace, nav, projectFile);
+                        if (projectFile is null)
+                        {
+                            CliSupport.PrintError(string.IsNullOrWhiteSpace(settings.Project)
+                                ? "No project found (looking for .sln/.csproj upwards)."
+                                : $"Project not found: {settings.Project}");
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 1: // package picker (auto when the id is given)
+                        if (!packageGiven)
+                        {
+                            var searchService = new NugetService(discovery);
+
+                            // Only top-level references can be removed, so the picker lists those.
+                            IReadOnlyList<InstalledPackage> installed = await searchService
+                                .ListAsync(projectFile!, includeTransitive: false, cancellationToken)
+                                .ConfigureAwait(false);
+                            if (installed.Count == 0)
+                            {
+                                CliSupport.PrintError($"No packages installed in {Path.GetFileName(projectFile)}.");
+                                return 1;
+                            }
+
+                            bool interactive = !settings.Yes && !Console.IsInputRedirected;
+                            if (!interactive && string.IsNullOrWhiteSpace(settings.Query) && installed.Count != 1)
+                            {
+                                CliSupport.PrintError(
+                                    "Provide a package id or --query when running non-interactively.");
+                                return 1;
+                            }
+
+                            selected = CliSupport.Choose(
+                                console,
+                                "packages",
+                                installed,
+                                static p => p.Id,
+                                static p => new[] { new WeightedField(p.Id, WeightedField.ShortNameWeight) },
+                                NugetFlow.InstalledDetail,
+                                tiebreak: null,
+                                settings.Query,
+                                settings.Yes,
+                                nav,
+                                selected);
+
+                            if (selected is null)
+                            {
+                                CliSupport.PrintError(string.IsNullOrWhiteSpace(settings.Query)
+                                    ? "No package selected."
+                                    : $"No installed package matches '{settings.Query}'.");
+                                return 1;
+                            }
+
+                            packageId = selected.Id;
+                        }
+
+                        nav.Next();
+                        break;
+                }
+            }
+            catch (PromptCancelledException)
             {
-                CliSupport.PrintError("Provide a package id or --query when running non-interactively.");
-                return 1;
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
             }
-
-            InstalledPackage? selected = CliSupport.Choose(
-                console,
-                "packages",
-                installed,
-                static p => p.Id,
-                static p => new[] { new WeightedField(p.Id, WeightedField.ShortNameWeight) },
-                NugetFlow.InstalledDetail,
-                tiebreak: null,
-                settings.Query,
-                settings.Yes);
-
-            if (selected is null)
-            {
-                CliSupport.PrintError(string.IsNullOrWhiteSpace(settings.Query)
-                    ? "No package selected."
-                    : $"No installed package matches '{settings.Query}'.");
-                return 1;
-            }
-
-            packageId = selected.Id;
         }
 
         var packageService = new NugetService(mutating);
         DotnetResult result = await packageService
-            .RemoveAsync(projectFile, packageId, cancellationToken)
+            .RemoveAsync(projectFile!, packageId!, cancellationToken)
             .ConfigureAwait(false);
 
-        string target = Path.GetFileName(projectFile);
+        string target = Path.GetFileName(projectFile!)!;
         return CliSupport.FinishMutation(
             settings,
             result,

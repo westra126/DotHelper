@@ -88,9 +88,10 @@ public sealed class RootWizard
     /// Runs the wizard: action picker (with the banner header inside its frame), optional
     /// sub-menu picker, then the action flow — all inside ONE fullscreen session
     /// (<see cref="ScreenSession"/>), so the menu never flashes the terminal history and the
-    /// result messages land on the restored primary screen. Esc at any menu prints
-    /// <c>Cancelled.</c> and exits 0; Ctrl+C surfaces as <see cref="OperationCanceledException"/>
-    /// (exit 130 at the command layer).
+    /// result messages land on the restored primary screen. Esc navigates back (user report):
+    /// sub-menu → root menu, root menu → exit 0, and a flow's first interactive step → the menu
+    /// the flow was dispatched from (caught <see cref="PromptCancelledException"/>). Ctrl+C
+    /// surfaces as <see cref="OperationCanceledException"/> (exit 130 at the command layer).
     /// </summary>
     public async Task<int> RunAsync(string? query, CancellationToken cancellationToken)
     {
@@ -107,37 +108,57 @@ public sealed class RootWizard
 
     private async Task<int> RunInteractiveAsync(string? query, CancellationToken cancellationToken)
     {
-        WizardItem? action = Pick(WizardMenu.Root, "action", query);
-        if (action is null)
-        {
-            OutputChannel.WriteLine(_console, "Cancelled.");
-            return 0;
-        }
+        IReadOnlyList<WizardItem> menu = WizardMenu.Root;
+        string title = "action";
+        string? seed = query;
+        bool inSubMenu = false;
 
-        if (action.Children.Count > 0)
+        while (true)
         {
-            action = Pick(action.Children, action.Title, query: null);
+            WizardItem? action = Pick(menu, title, seed, inSubMenu ? EscHint.Back : EscHint.Exit);
+            seed = null; // the query seeds only the very first frame
+
             if (action is null)
             {
+                if (inSubMenu)
+                {
+                    // Esc on a sub-menu goes back to the root menu (no exit).
+                    inSubMenu = false;
+                    menu = WizardMenu.Root;
+                    title = "action";
+                    continue;
+                }
+
                 OutputChannel.WriteLine(_console, "Cancelled.");
                 return 0;
             }
-        }
 
-        return await _executor(action, cancellationToken).ConfigureAwait(false);
+            if (action.Children.Count > 0)
+            {
+                inSubMenu = true;
+                menu = action.Children;
+                title = action.Title;
+                continue;
+            }
+
+            try
+            {
+                return await _executor(action, cancellationToken).ConfigureAwait(false);
+            }
+            catch (PromptCancelledException)
+            {
+                // Esc at the flow's first interactive step: back to the menu it came from
+                // (sub-menu when the leaf was picked there, root menu otherwise).
+            }
+        }
     }
 
     /// <summary>
-    /// Header lines of the wizard banner (PLAN.md §5.3): product title, version and key hints.
-    /// Rendered inside the picker frame (<see cref="FuzzyPickerOptions{T}.Header"/>) while the
-    /// fullscreen session is open; <see cref="RenderHeader"/> prints the same lines directly.
+    /// Header lines of the wizard banner: the canonical <see cref="AppHeader"/> lines with the
+    /// wizard's (test-injectable) version. Rendered inside the picker frame
+    /// (<see cref="FuzzyPickerOptions{T}.Header"/>) while the fullscreen session is open.
     /// </summary>
-    internal static IReadOnlyList<string> HeaderLines(string version) =>
-    [
-        $"[{Theme.AccentMarkup}]DotHelper[/] [{Theme.MutedMarkup}]{Markup.Escape(version)}[/] " +
-            $"[{Theme.MutedMarkup}]— asistente para .NET[/]",
-        $"[{Theme.MutedMarkup}]↑/↓ mover · Enter seleccionar · Esc cancelar · Tab detalle · escribir para filtrar[/]",
-    ];
+    internal static IReadOnlyList<string> HeaderLines(string version) => AppHeader.Lines(version);
 
     /// <summary>
     /// Prints the banner lines directly (kept as the canonical, byte-stable rendering of
@@ -147,13 +168,10 @@ public sealed class RootWizard
     {
         ArgumentNullException.ThrowIfNull(console);
 
-        foreach (string line in HeaderLines(version))
-        {
-            console.MarkupLine(line);
-        }
+        AppHeader.Render(console, version);
     }
 
-    private WizardItem? Pick(IReadOnlyList<WizardItem> items, string title, string? query)
+    private WizardItem? Pick(IReadOnlyList<WizardItem> items, string title, string? query, EscHint escHint)
     {
         var picker = new FuzzyPicker<WizardItem>(
             _console,
@@ -165,11 +183,20 @@ public sealed class RootWizard
                 DetailLines = WizardMenu.Detail,
                 Title = title,
                 Header = HeaderLines(_version),
+                EscHint = escHint,
                 InitialQuery = query,
                 KeyReader = _keyReader,
             });
 
-        return picker.Pick();
+        try
+        {
+            return picker.Pick();
+        }
+        catch (PromptCancelledException)
+        {
+            // Menu Esc: the loop decides — back to the parent menu, or exit at the root.
+            return null;
+        }
     }
 
     private static int DefaultShowHelp()

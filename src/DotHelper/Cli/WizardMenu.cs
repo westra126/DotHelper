@@ -154,6 +154,9 @@ public static class WizardDispatcher
     /// <summary>
     /// Dispatches the flow behind <paramref name="item"/>, inheriting the common flags
     /// (<c>--dry-run</c>/<c>--yes</c>/<c>--verbose</c>/<c>--print-cmd</c>) from the wizard root.
+    /// Wizard-dispatched flows back out with Esc to the menu they came from
+    /// (<see cref="EscHint.Back"/> as the first-step hint); direct commands keep
+    /// <see cref="EscHint.Cancel"/> ("Cancelled.", exit 1).
     /// </summary>
     public static Task<int> RunAsync(
         WizardItem item,
@@ -164,19 +167,19 @@ public static class WizardDispatcher
 
         return item.Id switch
         {
-            "new.solution" => NewSolutionFlow.RunAsync(New<NewSolutionSettings>(inherit), cancellationToken),
-            "new.project" => NewProjectFlow.RunAsync(New<NewProjectSettings>(inherit), cancellationToken),
-            "new.item" => ItemFlow.RunAsync(New<ItemCommandSettings>(inherit), cancellationToken),
+            "new.solution" => NewSolutionFlow.RunAsync(New<NewSolutionSettings>(inherit), cancellationToken, EscHint.Back),
+            "new.project" => NewProjectFlow.RunAsync(New<NewProjectSettings>(inherit), cancellationToken, EscHint.Back),
+            "new.item" => ItemFlow.RunAsync(New<ItemCommandSettings>(inherit), cancellationToken, EscHint.Back),
 
             "nuget.search" => NugetSearchFlow.RunAsync(New<NugetSearchSettings>(inherit), cancellationToken),
-            "nuget.add" => NugetAddFlow.RunAsync(New<NugetAddSettings>(inherit), cancellationToken),
-            "nuget.remove" => NugetRemoveFlow.RunAsync(New<NugetRemoveSettings>(inherit), cancellationToken),
-            "nuget.list" => NugetListFlow.RunAsync(New<NugetListSettings>(inherit), cancellationToken),
+            "nuget.add" => NugetAddFlow.RunAsync(New<NugetAddSettings>(inherit), cancellationToken, EscHint.Back),
+            "nuget.remove" => NugetRemoveFlow.RunAsync(New<NugetRemoveSettings>(inherit), cancellationToken, EscHint.Back),
+            "nuget.list" => NugetListFlow.RunAsync(New<NugetListSettings>(inherit), cancellationToken, EscHint.Back),
 
-            "references.add" => ProjectRefFlow.RunAsync(New<ProjectAddRefSettings>(inherit), remove: false, cancellationToken),
-            "references.remove" => ProjectRefFlow.RunAsync(New<ProjectAddRefSettings>(inherit), remove: true, cancellationToken),
+            "references.add" => ProjectRefFlow.RunAsync(New<ProjectAddRefSettings>(inherit), remove: false, cancellationToken, EscHint.Back),
+            "references.remove" => ProjectRefFlow.RunAsync(New<ProjectAddRefSettings>(inherit), remove: true, cancellationToken, EscHint.Back),
 
-            "list.templates" => ListTemplatesFlow.RunAsync(NewListTemplates(inherit), cancellationToken),
+            "list.templates" => ListTemplatesFlow.RunAsync(NewListTemplates(inherit), cancellationToken, EscHint.Back),
             "list.projects" => ProjectListFlow.RunAsync(New<ProjectListSettings>(inherit), cancellationToken),
             "list.solutions" => Task.FromResult(ListSolutionsFlow.Run()),
 

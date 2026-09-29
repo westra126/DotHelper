@@ -28,9 +28,10 @@ public sealed class RootWizardTests
 
         RootWizard.RenderHeader(console, "0.0.0-test");
 
+        // The canonical banner is one compact line (AppHeader is the single source) so it also
+        // fits Name/Folder/Confirm dialogs; contextual hints live in each dialog's hint row.
         console.Output.Replace("\r\n", "\n").Should().Be(
-            "DotHelper 0.0.0-test — asistente para .NET\n" +
-            "↑/↓ mover · Enter seleccionar · Esc cancelar · Tab detalle · escribir para filtrar\n");
+            "DotHelper 0.0.0-test — asistente para .NET\n");
     }
 
     [Fact]
@@ -127,16 +128,87 @@ public sealed class RootWizardTests
     }
 
     [Fact]
-    public async Task Esc_on_a_sub_menu_cancels_without_executing()
+    public async Task Esc_on_a_sub_menu_returns_to_the_root_menu()
     {
+        // Back navigation: Esc on a sub-menu never exits — it goes back to the root menu.
         Harness h = NewHarness(ScriptedKeyReader.From(
-            'n', 'u', 'g', 'e', 't', ConsoleKey.Enter, ConsoleKey.Escape));
+            'n', 'u', 'g', 'e', 't', ConsoleKey.Enter, ConsoleKey.Escape, ConsoleKey.Escape));
+
+        int exit = await h.RunAsync();
+
+        exit.Should().Be(0, "the second Esc leaves the root menu (exit 0)");
+        h.Executed.Should().BeEmpty();
+        h.Console.Output.Should().Contain("add", "the sub-menu was shown");
+        h.Console.Output.Should().Contain("Nueva solución", "the root menu is shown again after Esc");
+    }
+
+    [Fact]
+    public async Task Esc_on_the_root_menu_exits_cleanly()
+    {
+        Harness h = NewHarness(ScriptedKeyReader.From(ConsoleKey.Escape));
 
         int exit = await h.RunAsync();
 
         exit.Should().Be(0);
-        h.Executed.Should().BeEmpty();
         h.Console.Output.Should().Contain("Cancelled.");
+    }
+
+    [Fact]
+    public async Task A_flow_backed_out_with_esc_returns_to_the_root_menu()
+    {
+        // Esc at a flow's first interactive step (PromptCancelledException) never kills the
+        // wizard: the menu it dispatched from is shown again.
+        Harness h = NewHarness(ScriptedKeyReader.From('c', 'l', ConsoleKey.Enter, ConsoleKey.Escape));
+        h.ExecutorResult = _ => throw new PromptCancelledException();
+
+        int exit = await h.RunAsync();
+
+        exit.Should().Be(0, "the second Esc leaves the root menu");
+        h.Executed.Should().ContainSingle();
+        h.Executed[0].Id.Should().Be("new.item");
+        h.Console.Output.Should().Contain("Nueva solución", "the root menu is shown again");
+    }
+
+    [Fact]
+    public async Task A_flow_backed_out_with_esc_returns_to_its_sub_menu()
+    {
+        // "Back to the menu it came from": a leaf dispatched from a sub-menu returns there.
+        Harness h = NewHarness(ScriptedKeyReader.From(
+            'n', 'u', 'g', 'e', 't', ConsoleKey.Enter, ConsoleKey.Enter, ConsoleKey.Escape,
+            ConsoleKey.Escape, ConsoleKey.Escape));
+        h.ExecutorResult = _ => throw new PromptCancelledException();
+
+        int exit = await h.RunAsync();
+
+        exit.Should().Be(0);
+        h.Executed.Should().ContainSingle();
+        h.Executed[0].Id.Should().Be("nuget.search");
+        h.Console.Output.Should().Contain("add", "the NuGet sub-menu is shown again after the flow backs out");
+    }
+
+    [Fact]
+    public async Task The_banner_renders_inside_sub_menu_frames_too()
+    {
+        // Universal-header report: the sub-menus carry the banner just like the root menu.
+        Harness h = NewHarness(ScriptedKeyReader.From(
+            'n', 'u', 'g', 'e', 't', ConsoleKey.Enter, ConsoleKey.Escape, ConsoleKey.Escape));
+
+        await h.RunAsync();
+
+        h.Console.Output.Should().Contain("DotHelper 0.0.0-test");
+        h.Console.Output.Should().Contain("asistente para .NET", "every menu frame starts with the banner");
+    }
+
+    [Fact]
+    public async Task The_root_menu_esc_hint_says_exit_and_the_sub_menu_hint_says_back()
+    {
+        Harness h = NewHarness(ScriptedKeyReader.From(
+            'n', 'u', 'g', 'e', 't', ConsoleKey.Enter, ConsoleKey.Escape, ConsoleKey.Escape));
+
+        await h.RunAsync();
+
+        h.Console.Output.Should().Contain("Esc exit", "the root menu hint tells Esc leaves the app");
+        h.Console.Output.Should().Contain("Esc back", "the sub-menu hint tells Esc goes back");
     }
 
     [Fact]
@@ -256,7 +328,7 @@ public sealed class RootWizardTests
                 executor: (item, _) =>
                 {
                     Executed.Add(item);
-                    return Task.FromResult(42);
+                    return ExecutorResult(item);
                 },
                 showHelp: () =>
                 {
@@ -270,6 +342,9 @@ public sealed class RootWizardTests
         public TestConsole Console { get; }
 
         public List<WizardItem> Executed { get; } = [];
+
+        /// <summary>What the fake executor does per action (default: succeed with exit 42).</summary>
+        public Func<WizardItem, Task<int>> ExecutorResult { get; set; } = _ => Task.FromResult(42);
 
         public bool HelpShown { get; private set; }
 

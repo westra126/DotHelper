@@ -4,6 +4,12 @@ using FluentAssertions;
 
 namespace DotHelper.Tests.Unit;
 
+/// <summary>
+/// Real <c>dotnet</c> invocations through the runner. Joins the <c>ProcessState</c> collection:
+/// the runner observes the process-wide Ctrl+C token (see <c>AppInterrupt</c>), which the
+/// interrupt tests cancel — the two must never overlap.
+/// </summary>
+[Collection("ProcessState")]
 public sealed class DotnetRunnerTests
 {
     [Fact]

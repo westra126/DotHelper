@@ -1,6 +1,14 @@
 using DotHelper.Cli;
+using DotHelper.Core;
 
 using Spectre.Console.Cli;
+
+// Ctrl+C interrupts at any moment (user report): cancel the process-wide token instead of
+// killing the process with a stack trace. Flows and DotnetRunner observe it (the runner kills
+// the whole `dotnet` tree), ScreenSession restores the primary screen, and the global handler
+// reports "Cancelled." with exit code 130. Pickers/prompts treat Ctrl+C as a key and follow
+// the same contract (see AppInterrupt).
+AppInterrupt.Wire();
 
 var app = new CommandApp();
 

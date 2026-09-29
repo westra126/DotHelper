@@ -34,20 +34,23 @@ public static class TemplateSearch
         FuzzyScorer.TypePriority<TemplateInfo>(static t => t.Type);
 
     /// <summary>Picker options for browsing templates interactively.</summary>
-    public static FuzzyPickerOptions<TemplateInfo> PickerOptions(string? initialQuery = null) => new()
-    {
-        PrimaryText = static t => t.Name,
-        Fields = Fields,
-        DetailLines = static t => new[]
+    public static FuzzyPickerOptions<TemplateInfo> PickerOptions(
+        string? initialQuery = null,
+        EscHint escHint = EscHint.Cancel) => new()
         {
+            PrimaryText = static t => t.Name,
+            Fields = Fields,
+            DetailLines = static t => new[]
+            {
             $"Short names: {string.Join(", ", t.ShortNames)}",
             $"Type:        {(t.Type.Length == 0 ? "(none)" : t.Type)}",
             $"Languages:   {(t.Languages.Length == 0 ? "(none)" : string.Join(", ", t.Languages))}",
             $"Author:      {t.Author}",
             $"Tags:        {(t.Tags.Length == 0 ? "(none)" : string.Join(", ", t.Tags))}",
         },
-        Title = "templates",
-        Tiebreak = TypeTiebreak,
-        InitialQuery = initialQuery,
-    };
+            Title = "templates",
+            Tiebreak = TypeTiebreak,
+            InitialQuery = initialQuery,
+            EscHint = escHint,
+        };
 }

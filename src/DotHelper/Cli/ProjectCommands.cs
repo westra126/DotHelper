@@ -110,21 +110,29 @@ public static class ProjectListFlow
 /// <summary>Shared add-ref / remove-ref flow with double picker (PLAN.md §5.2).</summary>
 public static class ProjectRefFlow
 {
-    /// <summary>Runs the flow inside one fullscreen session (the side pickers interact).</summary>
+    /// <summary>
+    /// Runs the flow inside one fullscreen session (the side pickers interact). Esc rewinds
+    /// from the target picker to the source picker keeping the previous choices as
+    /// preselections; Esc at the first interactive step exits the flow (see
+    /// <see cref="FlowNavigator"/> and <paramref name="firstStepEsc"/>).
+    /// </summary>
     public static Task<int> RunAsync(
         ProjectAddRefSettings settings,
         bool remove,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc = EscHint.Cancel)
     {
         IAnsiConsole console = AnsiConsole.Console;
-        return ScreenSession.RunAsync(console, () => RunCoreAsync(console, settings, remove, cancellationToken));
+        return ScreenSession.RunAsync(
+            console, () => RunCoreAsync(console, settings, remove, cancellationToken, firstStepEsc));
     }
 
     private static async Task<int> RunCoreAsync(
         IAnsiConsole console,
         ProjectAddRefSettings settings,
         bool remove,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        EscHint firstStepEsc)
     {
         IDotnetRunner discovery = CliSupport.CreateDiscoveryRunner(settings);
         IDotnetRunner mutating = CliSupport.CreateMutatingRunner(settings);
@@ -141,25 +149,63 @@ public static class ProjectRefFlow
 
         IReadOnlyList<string> projects = workspace.SolutionProjectPaths;
 
-        string? from = ResolveSide(console, settings.From, projects, "source project", settings.Query, settings.Yes);
-        if (from is null)
-        {
-            CliSupport.PrintError("No source project selected.");
-            return 1;
-        }
+        // Answers kept across rewinds (see ItemFlow).
+        string? from = null;
+        string? to = null;
 
-        IReadOnlyList<string> targets = projects.Where(p => !string.Equals(p, from, StringComparison.Ordinal)).ToList();
-        string? to = ResolveSide(console, settings.To, targets, "target project", settings.Query, settings.Yes);
-        if (to is null)
+        FlowNavigator nav = new(firstStepEsc);
+        while (true)
         {
-            CliSupport.PrintError("No target project selected.");
-            return 1;
+            try
+            {
+                if (nav.Step > 1)
+                {
+                    break;
+                }
+
+                switch (nav.Step)
+                {
+                    case 0: // source project
+                        from = ResolveSide(
+                            console, settings.From, projects, "source project", settings.Query, settings.Yes, nav, from);
+                        if (from is null)
+                        {
+                            CliSupport.PrintError("No source project selected.");
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+
+                    case 1: // target project (never the source)
+                        IReadOnlyList<string> targets = projects
+                            .Where(p => !string.Equals(p, from, StringComparison.Ordinal))
+                            .ToList();
+                        to = ResolveSide(
+                            console, settings.To, targets, "target project", settings.Query, settings.Yes, nav, to);
+                        if (to is null)
+                        {
+                            CliSupport.PrintError("No target project selected.");
+                            return 1;
+                        }
+
+                        nav.Next();
+                        break;
+                }
+            }
+            catch (PromptCancelledException)
+            {
+                if (!nav.TryRewind())
+                {
+                    throw;
+                }
+            }
         }
 
         var projectService = new ProjectService(mutating);
         DotnetResult result = remove
-            ? await projectService.RemoveReferenceAsync(from, to, cancellationToken).ConfigureAwait(false)
-            : await projectService.AddReferenceAsync(from, to, cancellationToken).ConfigureAwait(false);
+            ? await projectService.RemoveReferenceAsync(from!, to!, cancellationToken).ConfigureAwait(false)
+            : await projectService.AddReferenceAsync(from!, to!, cancellationToken).ConfigureAwait(false);
 
         string target = $"{Path.GetFileName(from)} → {Path.GetFileName(to)}";
         return CliSupport.FinishMutation(
@@ -175,7 +221,9 @@ public static class ProjectRefFlow
         IReadOnlyList<string> projects,
         string title,
         string? query,
-        bool yes)
+        bool yes,
+        FlowNavigator? nav,
+        string? initialSelection)
     {
         if (!string.IsNullOrWhiteSpace(provided))
         {
@@ -192,6 +240,6 @@ public static class ProjectRefFlow
             return byName;
         }
 
-        return CliSupport.ChooseProject(console, projects, title, query, yes);
+        return CliSupport.ChooseProject(console, projects, title, query, yes, nav, initialSelection);
     }
 }

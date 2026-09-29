@@ -31,10 +31,21 @@ public sealed class FuzzyPickerOptions<T>
     public string? InitialQuery { get; init; }
 
     /// <summary>
-    /// Optional header lines (Spectre markup, trusted) rendered above the input line — e.g. the
-    /// root wizard banner, so it stays visible while the picker owns the fullscreen session.
+    /// Optional header lines (Spectre markup, trusted) rendered at the very top of the frame.
+    /// <c>null</c> (the default) renders the canonical banner (<see cref="AppHeader.Lines"/>) so
+    /// every menu/dialog shows it without any call-site wiring; an empty list suppresses it
+    /// (tests); a non-empty list overrides it (e.g. a custom version).
     /// </summary>
     public IReadOnlyList<string>? Header { get; init; }
+
+    /// <summary>Contextual Esc hint rendered in the hint row (default: <see cref="EscHint.Cancel"/>).</summary>
+    public EscHint EscHint { get; init; } = EscHint.Cancel;
+
+    /// <summary>
+    /// Item preselected on the first frame (the remembered choice of a previous step — "keep
+    /// what was chosen" semantics of the back navigation). <c>default</c> means no preselection.
+    /// </summary>
+    public T? InitialSelection { get; init; }
 
     /// <summary>
     /// Optional key source (Fase 5 testability). When <c>null</c> the picker reads the real
@@ -65,7 +76,11 @@ public sealed class FuzzyPicker<T>
     }
 
     /// <summary>
-    /// Runs the picker and returns the selected item, or <c>default</c> when cancelled with Esc.
+    /// Runs the picker and returns the selected item. Esc raises
+    /// <see cref="PromptCancelledException"/> — the application-wide "user backed out" signal
+    /// (same as prompts), which the surrounding flow's <see cref="FlowNavigator"/> turns into
+    /// "go back one step" and the caller of the flow turns into a cancel or a return-to-menu.
+    /// The only <c>default</c> result is Enter over an empty match list.
     /// </summary>
     /// <remarks>
     /// Ctrl+C surfaces as <see cref="OperationCanceledException"/> (the caller wires
@@ -104,6 +119,9 @@ public sealed class FuzzyPicker<T>
         bool done = false;
 
         IReadOnlyList<ScoredItem<T>> ranked = RankItems(query);
+
+        // "Keep what was chosen": reopen on the remembered selection when present in the list.
+        selectedIndex = IndexOfInitial(ranked);
 
         // Ctrl+C interception only matters for the real console.
         bool previousTreatControlCAsInput = false;
@@ -163,9 +181,7 @@ public sealed class FuzzyPicker<T>
                             throw new OperationCanceledException(cancellationToken);
 
                         case PickerAction.Cancel:
-                            result = default;
-                            done = true;
-                            break;
+                            throw new PromptCancelledException();
 
                         case PickerAction.Select:
                             result = Current(ranked, selectedIndex);
@@ -229,6 +245,35 @@ public sealed class FuzzyPicker<T>
     private IReadOnlyList<ScoredItem<T>> RankItems(string query) =>
         FuzzyScorer.Rank(query, _items, _options.Fields, _options.Cutoff, _options.Tiebreak);
 
+    /// <summary>Header lines actually rendered: the override, or the canonical banner by default.</summary>
+    private IReadOnlyList<string> EffectiveHeader =>
+        _options.Header ?? AppHeader.Lines();
+
+    /// <summary>
+    /// Index of <see cref="FuzzyPickerOptions{T}.InitialSelection"/> in the ranked list
+    /// (0 when absent). Pure helper kept free of rendering.
+    /// </summary>
+    internal static int IndexOfInitial(IReadOnlyList<ScoredItem<T>> ranked, T? initialSelection)
+    {
+        if (initialSelection is null)
+        {
+            return 0;
+        }
+
+        for (int i = 0; i < ranked.Count; i++)
+        {
+            if (EqualityComparer<T>.Default.Equals(ranked[i].Item, initialSelection))
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
+    private int IndexOfInitial(IReadOnlyList<ScoredItem<T>> ranked) =>
+        IndexOfInitial(ranked, _options.InitialSelection);
+
     /// <summary>
     /// Window layout for one frame (Fase: full-height picker). With an injected key reader the
     /// configured <c>PageSize</c> is kept for deterministic tests; with the real console the page
@@ -251,7 +296,7 @@ public sealed class FuzzyPicker<T>
                 showDetail,
                 detailLines,
                 ranked.Count,
-                _options.Header?.Count ?? 0);
+                EffectiveHeader.Count);
     }
 
     private static T? Current(IReadOnlyList<ScoredItem<T>> ranked, int selectedIndex) =>
@@ -350,14 +395,12 @@ public sealed class FuzzyPicker<T>
     {
         List<IRenderable> elements = [];
 
-        // Header (user report 1): the wizard banner lives inside the picker frame, so it is
-        // visible while the alternate screen is open — never on the hidden primary screen.
-        if (_options.Header is { Count: > 0 })
+        // Header (user report 1 + universal-header report): the canonical banner lives inside
+        // the picker frame by default, so it is visible while the alternate screen is open —
+        // never on the hidden primary screen. Overridable/suppressible per call site.
+        foreach (string line in EffectiveHeader)
         {
-            foreach (string line in _options.Header)
-            {
-                elements.Add(new Markup(line));
-            }
+            elements.Add(new Markup(line));
         }
 
         string title = _options.Title ?? "select";
@@ -411,7 +454,7 @@ public sealed class FuzzyPicker<T>
         }
 
         elements.Add(new Markup(
-            $"[{Theme.MutedMarkup}]↑/↓ move · Enter select · Esc cancel · Tab detail[/]"));
+            $"[{Theme.MutedMarkup}]↑/↓ move · Enter select · {EscHintText.For(_options.EscHint)} · Tab detail · type to filter[/]"));
 
         return new Rows(elements);
     }
